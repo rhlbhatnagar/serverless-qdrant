@@ -11,13 +11,10 @@ jobs:
 
     steps:
 
-    # - name: Install Rust toolchain
-    #   uses: dtolnay/rust-toolchain@stable
-
-    # - Intall Protobuf compiler
-    #   uses: arduino/setup-protoc@v1
-    #   with:
-    #     repo-token: ${{ secrets.GITHUB_TOKEN }}
+    - Intall Protobuf compiler
+      uses: arduino/setup-protoc@v1
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Checkout Qdrant repository
       uses: actions/checkout@v3
