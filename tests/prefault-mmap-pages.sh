@@ -23,10 +23,10 @@ function - {
 }
 
 cd $QDRANT_DIR
-cargo build --release --bin qdrant
+- cargo build --release --bin qdrant
 
 cd $BFB_DIR
-cargo build --release
+- cargo build --release
 
 cd $QDRANT_DIR
 
