@@ -18,32 +18,28 @@ then
 	exit 2
 fi
 
-function - {
-	echo $@
-}
-
 cd $QDRANT_DIR
-- cargo build --release --bin qdrant
+cargo build --release --bin qdrant
 
 cd $BFB_DIR
-- cargo build --release
+cargo build --release
 
 cd $QDRANT_DIR
 
 QDRANT__LOG_LEVEL=debug,raft=info,segment::common::mmap_ops=trace \
 QDRANT__STORAGE__OPTIMIZERS__MEMMAP_THRESHOLD_KB=1 \
-- ./target/release/qdrant &
+./target/release/qdrant &
 
-- $BFB_DIR/target/release/bfb -n 1000000 --indexing-threshold 1000000000
+$BFB_DIR/target/release/bfb -n 1000000 --indexing-threshold 1000000000
 
-- kill %%
+kill %%
 
 QDRANT__LOG_LEVEL=debug,raft=info,segment::common::mmap_ops=trace \
 QDRANT__STORAGE__OPTIMIZERS__MEMMAP_THRESHOLD_KB=1 \
-- ./target/release/qdrant &
+./target/release/qdrant &
 
 function search() {
-	- time \
+	time \
 		curl localhost:6333/collections/benchmark/points/search \
 		-X POST -H 'Content-Type: application/json' --data-raw '{
 			"vector": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
