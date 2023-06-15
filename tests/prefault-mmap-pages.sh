@@ -33,6 +33,7 @@ QDRANT__STORAGE__OPTIMIZERS__MEMMAP_THRESHOLD_KB=1 \
 $BFB_DIR/target/release/bfb -n 1000000 --indexing-threshold 1000000000
 
 kill %%
+wait
 
 QDRANT__LOG_LEVEL=debug,raft=info,segment::common::mmap_ops=trace \
 QDRANT__STORAGE__OPTIMIZERS__MEMMAP_THRESHOLD_KB=1 \
