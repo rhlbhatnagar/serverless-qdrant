@@ -32,4 +32,4 @@ jobs:
 
     - name: Run `prefault_mmap_pages` test on Windows
       shell: bash
-      run: cat ./qdrant/tests/prefault-mmap-pages.sh | bash -- - qdrant bfb
+      run: bash ./qdrant/tests/prefault-mmap-pages.sh qdrant bfb
