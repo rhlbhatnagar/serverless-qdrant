@@ -24,11 +24,11 @@ jobs:
       with:
         path: qdrant
 
-    # - name: Checkout BFB repository
-    #   uses: actions/checkout@v3
-    #   with:
-    #     repository: qdrant/bfb
-    #     path: bfb
+    - name: Checkout BFB repository
+      uses: actions/checkout@v3
+      with:
+        repository: qdrant/bfb
+        path: bfb
 
     - name: Run `prefault_mmap_pages` test on Windows
       shell: bash
