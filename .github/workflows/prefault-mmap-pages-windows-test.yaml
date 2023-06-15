@@ -11,7 +11,7 @@ jobs:
 
     steps:
 
-    - Intall Protobuf compiler
+    - name: Intall Protobuf compiler
       uses: arduino/setup-protoc@v1
       with:
         repo-token: ${{ secrets.GITHUB_TOKEN }}
