@@ -17,7 +17,7 @@ RUN cargo chef prepare --recipe-path recipe.json
 
 
 FROM chef as builder
-WORKDIR /qdrant
+WORKDIR /qdrant-src
 
 COPY --from=xx / /
 
@@ -86,25 +86,27 @@ RUN PATH="$PATH:/opt/mold/bin" \
     RUSTFLAGS="${LINKER:+-C link-arg=-fuse-ld=}$LINKER $RUSTFLAGS" \
     xx-cargo build --profile $PROFILE ${FEATURES:+--features} $FEATURES --bin qdrant \
     && PROFILE_DIR=$(if [ "$PROFILE" = dev ]; then echo debug; else echo $PROFILE; fi) \
-    && mv target/$(xx-cargo --print-target-triple)/$PROFILE_DIR/qdrant /qdrant/qdrant
+    && mv target/$(xx-cargo --print-target-triple)/$PROFILE_DIR/qdrant /qdrant-src/qdrant
 
+# Download and extract Web UI
+RUN mkdir /static && STATIC_DIR='/static' ./tools/sync-web-ui.sh
 
-# Download and extract web UI
-RUN mkdir /static ; STATIC_DIR='/static' ./tools/sync-web-ui.sh
 
 FROM debian:12-slim AS qdrant
 
+ARG DEBUGGER
+
 RUN apt-get update \
-    && apt-get install -y ca-certificates tzdata \
+    && apt-get install -y ca-certificates tzdata ${DEBUGGER:+gdb} \
     && rm -rf /var/lib/apt/lists/*
 
 ARG APP=/qdrant
 
 RUN mkdir -p ${APP}
 
-COPY --from=builder /qdrant/qdrant ${APP}/qdrant
-COPY --from=builder /qdrant/config ${APP}/config
-COPY --from=builder /qdrant/tools/entrypoint.sh ${APP}/entrypoint.sh
+COPY --from=builder /qdrant-src/qdrant ${APP}/qdrant
+COPY --from=builder /qdrant-src/config ${APP}/config
+COPY --from=builder /qdrant-src/tools/entrypoint.sh ${APP}/entrypoint.sh
 COPY --from=builder /static ${APP}/static
 
 WORKDIR ${APP}
