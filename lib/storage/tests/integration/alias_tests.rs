@@ -55,6 +55,7 @@ fn test_alias_operation() {
         handle_collection_load_errors: false,
         recovery_mode: None,
         async_scorer: false,
+        gpu_indexing: false,
     };
 
     let search_runtime = Runtime::new().unwrap();

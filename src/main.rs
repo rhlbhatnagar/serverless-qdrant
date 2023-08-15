@@ -123,6 +123,7 @@ fn main() -> anyhow::Result<()> {
 
     segment::madvise::set_global(settings.storage.mmap_advice);
     segment::vector_storage::common::set_async_scorer(settings.storage.async_scorer);
+    segment::index::hnsw_index::gpu::set_gpu_indexing(settings.storage.gpu_indexing);
 
     welcome(&settings);
 

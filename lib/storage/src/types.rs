@@ -69,6 +69,8 @@ pub struct StorageConfig {
     /// Provided value will be used error message for unavailable requests.
     #[serde(default)]
     pub recovery_mode: Option<String>,
+    #[serde(default)]
+    pub gpu_indexing: bool,
 }
 
 impl StorageConfig {
