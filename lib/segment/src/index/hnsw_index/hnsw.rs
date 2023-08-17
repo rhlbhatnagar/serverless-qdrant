@@ -20,8 +20,8 @@ use crate::entry::entry_point::{check_process_stopped, OperationError, Operation
 use crate::id_tracker::IdTrackerSS;
 use crate::index::hnsw_index::build_condition_checker::BuildConditionChecker;
 use crate::index::hnsw_index::config::HnswGraphConfig;
+use crate::index::hnsw_index::gpu::combined_graph_builder::CombinedGraphBuilder;
 use crate::index::hnsw_index::gpu::get_gpu_indexing;
-use crate::index::hnsw_index::gpu::gpu_graph_builder::GpuGraphBuilder;
 use crate::index::hnsw_index::graph_layers::GraphLayers;
 use crate::index::hnsw_index::graph_layers_builder::GraphLayersBuilder;
 use crate::index::hnsw_index::max_rayon_threads;
@@ -596,7 +596,7 @@ impl<TGraphLinks: GraphLinks> VectorIndex for HNSWIndex<TGraphLinks> {
                 } else {
                     new_raw_scorer(vec![], &vector_storage, id_tracker.deleted_point_bitslice())
                 };
-                let mut gpu_graph_builder = GpuGraphBuilder::new(
+                let mut gpu_graph_builder = CombinedGraphBuilder::new(
                     total_vector_count,
                     self.config.m,
                     self.config.m0,
