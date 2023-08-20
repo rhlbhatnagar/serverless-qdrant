@@ -555,9 +555,9 @@ impl<TGraphLinks: GraphLinks> VectorIndex for HNSWIndex<TGraphLinks> {
             let ids: Vec<_> = id_tracker.iter_ids_excluding(deleted_bitslice).collect();
 
             indexed_vectors = ids.len();
+            let timer = std::time::Instant::now();
 
             if !gpu_indexing {
-                let timer = std::time::Instant::now();
                 pool.install(|| {
                     ids.into_par_iter().try_for_each(|vector_id| {
                         check_process_stopped(stopped)?;
@@ -583,8 +583,6 @@ impl<TGraphLinks: GraphLinks> VectorIndex for HNSWIndex<TGraphLinks> {
                         Ok::<_, OperationError>(())
                     })
                 })?;
-
-                debug!("finish main graph in time {:?}", timer.elapsed());
             } else {
                 let raw_scorer_fabric = || {
                     if let Some(quantized_storage) = vector_storage.quantized_storage() {
@@ -613,6 +611,8 @@ impl<TGraphLinks: GraphLinks> VectorIndex for HNSWIndex<TGraphLinks> {
                 gpu_graph_builder.build();
                 graph_layers_builder = gpu_graph_builder.into_graph_layers_builder();
             }
+
+            debug!("finish main graph in time {:?}", timer.elapsed());
         } else {
             debug!("skip building main HNSW graph");
         }
