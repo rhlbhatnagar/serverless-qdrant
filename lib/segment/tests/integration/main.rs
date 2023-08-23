@@ -26,3 +26,6 @@ pub mod segment_builder_test;
 pub mod segment_tests;
 #[cfg(test)]
 pub mod utils;
+
+#[cfg(test)]
+pub mod glove100_gpu_test;
