@@ -10,6 +10,8 @@ use serde::Deserialize;
 use storage::types::StorageConfig;
 use validator::Validate;
 
+use crate::tracing;
+
 const DEFAULT_CONFIG: &str = include_str!("../config/config.yaml");
 
 #[derive(Debug, Deserialize, Validate, Clone)]
@@ -116,8 +118,10 @@ pub struct TlsConfig {
 
 #[derive(Debug, Deserialize, Clone, Validate)]
 pub struct Settings {
-    #[serde(default = "default_log_level")]
-    pub log_level: String,
+    #[serde(default)]
+    pub log_level: Option<String>,
+    #[serde(default)]
+    pub logger: tracing::LoggerConfig,
     #[validate]
     pub storage: StorageConfig,
     #[validate]
@@ -250,10 +254,6 @@ const fn default_telemetry_disabled() -> bool {
 
 const fn default_cors() -> bool {
     true
-}
-
-fn default_log_level() -> String {
-    "INFO".to_string()
 }
 
 const fn default_timeout_ms() -> u64 {
