@@ -131,7 +131,7 @@ fn main() -> anyhow::Result<()> {
 
     let reporting_id = TelemetryCollector::generate_id();
 
-    tracing::setup(
+    let logger_handle = tracing::setup(
         settings
             .logger
             .with_top_level_directive(settings.log_level.take()),
@@ -401,6 +401,7 @@ fn main() -> anyhow::Result<()> {
                         telemetry_collector,
                         health_checker,
                         settings,
+                        logger_handle,
                     ),
                 )
             })
