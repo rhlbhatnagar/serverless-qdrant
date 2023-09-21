@@ -11,14 +11,11 @@ use tokio::sync::RwLock;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{filter, fmt, reload, Registry};
 
-pub fn setup(config: &LoggerConfig) -> anyhow::Result<()> {
+pub fn setup(config: &LoggerConfig) -> anyhow::Result<LoggerHandle> {
     tracing_log::LogTracer::init()?;
 
-    let default_logger = fmt::Layer::new()
-        .with_ansi(config.default.color.to_bool())
-        .with_span_events(config.default.span_events.clone().into())
-        .with_filter(filter(config.default.log_level.as_deref().unwrap_or("")));
-
+    let default_logger = Some(fmt::Layer::default()).with_filter(filter::EnvFilter::default());
+    let (default_logger, default_logger_handle) = reload::Layer::new(default_logger);
     let reg = tracing_subscriber::registry().with(default_logger);
 
     // Use `console` or `console-subscriber` feature to enable `console-subscriber`
@@ -46,10 +43,47 @@ pub fn setup(config: &LoggerConfig) -> anyhow::Result<()> {
 
     tracing::subscriber::set_global_default(reg)?;
 
-    Ok(())
+    LoggerHandle::new(config.clone(), default_logger_handle)
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone)]
+pub struct LoggerHandle {
+    config: Arc<RwLock<LoggerConfig>>,
+    default: DefaultLoggerReloadHandle,
+}
+
+type DefaultLoggerReloadHandle = reload::Handle<
+    filter::Filtered<Option<fmt::Layer<Registry>>, filter::EnvFilter, Registry>,
+    Registry,
+>;
+
+impl LoggerHandle {
+    pub fn new(config: LoggerConfig, default: DefaultLoggerReloadHandle) -> anyhow::Result<Self> {
+        default.modify(|logger| update_default_logger(logger, &config.default))?;
+
+        let handle = Self {
+            config: Arc::new(RwLock::new(config)),
+            default,
+        };
+
+        Ok(handle)
+    }
+
+    pub async fn get_config(&self) -> LoggerConfig {
+        self.config.read().await.clone()
+    }
+
+    pub async fn update_config(&self, diff: LoggerConfigDiff) -> anyhow::Result<()> {
+        self.default
+            .modify(|logger| update_default_logger(logger, &diff.default))?;
+
+        self.config.write().await.update(diff);
+
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct LoggerConfig {
     #[serde(flatten)]
     default: DefaultLoggerConfig,
@@ -65,17 +99,37 @@ impl LoggerConfig {
         self.default.log_level = self.default.log_level.take().or(log_level);
         self
     }
+
+    pub fn update(&mut self, diff: LoggerConfigDiff) {
+        self.default.update(diff.default);
+    }
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct DefaultLoggerConfig {
     log_level: Option<String>,
     span_events: SpanEvents,
     color: Color,
 }
 
-#[derive(Clone, Debug, Deserialize, SmartDefault)]
-#[serde(from = "helpers::SpanEvents")]
+impl DefaultLoggerConfig {
+    pub fn update(&mut self, diff: DefaultLoggerConfigDiff) {
+        if let Some(log_level) = diff.log_level {
+            self.log_level = Some(log_level);
+        }
+
+        if let Some(span_events) = diff.span_events {
+            self.span_events = span_events;
+        }
+
+        if let Some(color) = diff.color {
+            self.color = color;
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, SmartDefault)]
+#[serde(from = "helpers::SpanEvents", into = "helpers::SpanEvents")]
 pub struct SpanEvents {
     #[default(fmt::format::FmtSpan::NONE)]
     events: fmt::format::FmtSpan,
@@ -93,8 +147,8 @@ impl From<SpanEvents> for fmt::format::FmtSpan {
     }
 }
 
-#[derive(Copy, Clone, Debug, Deserialize, SmartDefault)]
-#[serde(from = "helpers::Color")]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, SmartDefault)]
+#[serde(from = "helpers::Color", into = "helpers::Color")]
 pub enum Color {
     #[default]
     Auto,
@@ -115,7 +169,7 @@ impl Color {
 mod helpers {
     use super::*;
 
-    #[derive(Clone, Debug, Deserialize)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     #[serde(untagged)]
     pub enum SpanEvents {
         Some(Vec<SpanEvent>),
@@ -124,6 +178,16 @@ mod helpers {
     }
 
     impl SpanEvents {
+        pub fn from_fmt_span(events: fmt::format::FmtSpan) -> Self {
+            let events = SpanEvent::from_fmt_span(events);
+
+            if !events.is_empty() {
+                Self::Some(events)
+            } else {
+                Self::None(NoneTag::None)
+            }
+        }
+
         pub fn to_fmt_span(&self) -> fmt::format::FmtSpan {
             self.as_slice()
                 .iter()
@@ -141,13 +205,19 @@ mod helpers {
         }
     }
 
+    impl From<super::SpanEvents> for SpanEvents {
+        fn from(events: super::SpanEvents) -> Self {
+            Self::from_fmt_span(events.into())
+        }
+    }
+
     impl From<SpanEvents> for super::SpanEvents {
         fn from(events: SpanEvents) -> Self {
             events.to_fmt_span().into()
         }
     }
 
-    #[derive(Copy, Clone, Debug, Deserialize)]
+    #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
     #[serde(rename_all = "lowercase")]
     pub enum SpanEvent {
         New,
@@ -157,6 +227,21 @@ mod helpers {
     }
 
     impl SpanEvent {
+        pub fn from_fmt_span(events: fmt::format::FmtSpan) -> Vec<Self> {
+            const EVENTS: &[SpanEvent] = &[
+                SpanEvent::New,
+                SpanEvent::Enter,
+                SpanEvent::Exit,
+                SpanEvent::Close,
+            ];
+
+            EVENTS
+                .iter()
+                .copied()
+                .filter(|event| events.clone() & event.to_fmt_span() == event.to_fmt_span())
+                .collect()
+        }
+
         pub fn to_fmt_span(self) -> fmt::format::FmtSpan {
             match self {
                 SpanEvent::New => fmt::format::FmtSpan::NEW,
@@ -167,17 +252,27 @@ mod helpers {
         }
     }
 
-    #[derive(Copy, Clone, Debug, Deserialize)]
+    #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
     #[serde(rename_all = "lowercase")]
     pub enum NoneTag {
         None,
     }
 
-    #[derive(Copy, Clone, Debug, Deserialize)]
+    #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
     #[serde(untagged)]
     pub enum Color {
         Auto(AutoTag),
         Bool(bool),
+    }
+
+    impl From<super::Color> for Color {
+        fn from(color: super::Color) -> Self {
+            match color {
+                super::Color::Auto => Self::Auto(AutoTag::Auto),
+                super::Color::Enable => Self::Bool(true),
+                super::Color::Disable => Self::Bool(false),
+            }
+        }
     }
 
     impl From<Color> for super::Color {
@@ -195,6 +290,19 @@ mod helpers {
     pub enum AutoTag {
         Auto,
     }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct LoggerConfigDiff {
+    #[serde(flatten)]
+    default: DefaultLoggerConfigDiff,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct DefaultLoggerConfigDiff {
+    log_level: Option<String>,
+    span_events: Option<SpanEvents>,
+    color: Option<Color>,
 }
 
 const DEFAULT_LOG_LEVEL: log::LevelFilter = log::LevelFilter::Info;
@@ -232,4 +340,74 @@ fn filter(user_filters: &str) -> filter::EnvFilter {
     filter::EnvFilter::builder()
         .with_regex(false)
         .parse_lossy(filter)
+}
+
+#[rustfmt::skip] // `rustfmt` formats this into unreadable single line :/
+type Logger<S, N, F, T, W, SS> = filter::Filtered<
+    Option<fmt::Layer<S, N, fmt::format::Format<F, T>, W>>,
+    filter::EnvFilter,
+    SS,
+>;
+
+fn update_default_logger<S, N, F, T, W, SS>(
+    logger: &mut Logger<S, N, F, T, W, SS>,
+    config: &impl AsLoggerConfigDiff,
+) where
+    N: for<'writer> fmt::FormatFields<'writer> + 'static,
+{
+    if let Some(user_filters) = config.log_level() {
+        *logger.filter_mut() = filter(user_filters);
+    }
+
+    if let Some(span_events) = config.span_events() {
+        let mut layer = logger.inner_mut().take().expect("valid logger state");
+        layer = layer.with_span_events(span_events.into());
+        *logger.inner_mut() = Some(layer);
+    }
+
+    if let Some(color) = config.color() {
+        logger
+            .inner_mut()
+            .as_mut()
+            .expect("valid logger state")
+            .set_ansi(color.to_bool());
+    }
+}
+
+/// Helper trait to abstract different `*LoggerConfig` and `*LoggerConfigDiff` types
+trait AsLoggerConfigDiff {
+    fn log_level(&self) -> Option<&str>;
+    fn span_events(&self) -> Option<SpanEvents>;
+
+    fn color(&self) -> Option<Color> {
+        None
+    }
+}
+
+impl AsLoggerConfigDiff for DefaultLoggerConfig {
+    fn log_level(&self) -> Option<&str> {
+        self.log_level.as_deref()
+    }
+
+    fn span_events(&self) -> Option<SpanEvents> {
+        Some(self.span_events.clone())
+    }
+
+    fn color(&self) -> Option<Color> {
+        Some(self.color)
+    }
+}
+
+impl AsLoggerConfigDiff for DefaultLoggerConfigDiff {
+    fn log_level(&self) -> Option<&str> {
+        self.log_level.as_deref()
+    }
+
+    fn span_events(&self) -> Option<SpanEvents> {
+        self.span_events.clone()
+    }
+
+    fn color(&self) -> Option<Color> {
+        self.color
+    }
 }

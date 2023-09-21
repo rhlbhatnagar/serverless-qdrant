@@ -130,7 +130,7 @@ fn main() -> anyhow::Result<()> {
 
     let reporting_id = TelemetryCollector::generate_id();
 
-    tracing::setup(
+    let logger_handle = tracing::setup(
         settings
             .logger
             .with_top_level_directive(settings.log_level.take()),
@@ -385,7 +385,12 @@ fn main() -> anyhow::Result<()> {
             .spawn(move || {
                 log_err_if_any(
                     "REST",
-                    actix::init(dispatcher_arc.clone(), telemetry_collector, settings),
+                    actix::init(
+                        dispatcher_arc.clone(),
+                        telemetry_collector,
+                        settings,
+                        logger_handle,
+                    ),
                 )
             })
             .unwrap();
