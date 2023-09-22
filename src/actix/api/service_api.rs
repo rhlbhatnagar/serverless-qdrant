@@ -121,7 +121,9 @@ async fn kubernetes_healthz() -> impl Responder {
 
 #[get("/logger")]
 async fn get_logger_config(handle: web::Data<tracing::LoggerHandle>) -> impl Responder {
-    web::Json(handle.get_config().await)
+    let timing = Instant::now();
+    let result = handle.get_config().await;
+    process_response(Ok(result), timing)
 }
 
 #[post("/logger")]
