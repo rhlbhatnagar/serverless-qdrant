@@ -57,7 +57,11 @@ pub struct LoggerHandle {
     default: DefaultLoggerReloadHandle,
 }
 
-type DefaultLoggerReloadHandle<S = Registry> = reload::Handle<default::Logger<S>, S>;
+#[rustfmt::skip] // `rustfmt` formats this into unreadable single line :/
+type DefaultLoggerReloadHandle<S = Registry> = reload::Handle<
+    default::Logger<S>,
+    S,
+>;
 
 impl LoggerHandle {
     pub fn new(config: config::LoggerConfig, default: DefaultLoggerReloadHandle) -> Self {
