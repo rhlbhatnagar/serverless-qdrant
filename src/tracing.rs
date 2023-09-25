@@ -1,4 +1,4 @@
-#![allow(dead_code, unused_imports)] // `schema_generator` and `#[cfg(...)]` attributes produce warnings :/
+#![allow(dead_code)] // `schema_generator` and `#[cfg(...)]` attributes produce warnings :/
 
 use std::fmt::Write as _;
 use std::io::{self, IsTerminal as _};
@@ -99,8 +99,10 @@ pub mod config {
     impl LoggerConfig {
         pub fn with_top_level_directive(&mut self, log_level: Option<String>) -> &mut Self {
             if self.default.log_level.is_some() && log_level.is_some() {
-                // TODO: Warn if both top-level `log_level` and `LoggerConfig::log_level` directives are used
-                eprintln!("TODO");
+                eprintln!(
+                    "Both top-level `log_level` and `logger.log_level` config directives are used. \
+                     `logger.log_level` takes priority, so top-level `log_level` will be ignored."
+                );
             }
 
             self.default.log_level = self.default.log_level.take().or(log_level);
