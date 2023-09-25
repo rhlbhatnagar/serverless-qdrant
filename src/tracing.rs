@@ -1,4 +1,4 @@
-#![allow(dead_code)] // `schema_generator` and `#[cfg(...)]` attributes produce warnings :/
+#![allow(dead_code)] // `schema_generator` binary target produce warnings
 
 use std::fmt::Write as _;
 use std::io::{self, IsTerminal as _};
@@ -57,7 +57,7 @@ pub struct LoggerHandle {
     default: DefaultLoggerReloadHandle,
 }
 
-#[rustfmt::skip] // `rustfmt` formats this into unreadable single line :/
+#[rustfmt::skip] // `rustfmt` formats this into unreadable single line
 type DefaultLoggerReloadHandle<S = Registry> = reload::Handle<
     default::Logger<S>,
     S,
@@ -90,7 +90,8 @@ impl LoggerHandle {
 pub mod config {
     use super::*;
 
-    #[derive(Clone, Debug, Default, Deserialize, Serialize)]
+    #[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+    #[serde(default)]
     pub struct LoggerConfig {
         #[serde(flatten)]
         pub default: default::Config,
@@ -114,13 +115,14 @@ pub mod config {
         }
     }
 
-    #[derive(Clone, Debug, Default, Deserialize)]
+    #[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize)]
+    #[serde(default)]
     pub struct LoggerConfigDiff {
         #[serde(flatten)]
         pub default: default::ConfigDiff,
     }
 
-    #[derive(Clone, Debug, Deserialize, Serialize, SmartDefault)]
+    #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, SmartDefault)]
     #[serde(from = "helpers::SpanEvents", into = "helpers::SpanEvents")]
     pub struct SpanEvents {
         #[default(fmt::format::FmtSpan::NONE)]
@@ -139,7 +141,7 @@ pub mod config {
         }
     }
 
-    #[derive(Copy, Clone, Debug, Deserialize, Serialize, SmartDefault)]
+    #[derive(Copy, Clone, Debug, Eq, PartialEq, Deserialize, Serialize, SmartDefault)]
     #[serde(from = "helpers::Color", into = "helpers::Color")]
     pub enum Color {
         #[default]
@@ -292,7 +294,8 @@ pub mod config {
 mod default {
     use super::*;
 
-    #[derive(Clone, Debug, Default, Deserialize, Serialize)]
+    #[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+    #[serde(default)]
     pub struct Config {
         pub log_level: Option<String>,
         pub span_events: config::SpanEvents,
@@ -315,14 +318,17 @@ mod default {
         }
     }
 
-    #[derive(Clone, Debug, Default, Deserialize)]
+    #[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize)]
     pub struct ConfigDiff {
+        // Distinguish between unspecified field (`None`) and explicit `null` (`Some(None)`)
+        // See https://github.com/serde-rs/serde/issues/984#issuecomment-314143738
+        #[serde(default, deserialize_with = "deserialize_some")]
         pub log_level: Option<Option<String>>,
         pub span_events: Option<config::SpanEvents>,
         pub color: Option<config::Color>,
     }
 
-    #[rustfmt::skip] // `rustfmt` formats this into unreadable single line :/
+    #[rustfmt::skip] // `rustfmt` formats this into unreadable single line
     pub type Logger<S> = filter::Filtered<
         Option<fmt::Layer<S>>,
         filter::EnvFilter,
@@ -406,4 +412,101 @@ fn filter<'a>(
     filter::EnvFilter::builder()
         .with_regex(false)
         .parse_lossy(filter)
+}
+
+// Helper to distinguish between unspecified field and explicit `null`
+// See https://github.com/serde-rs/serde/issues/984#issuecomment-314143738
+fn deserialize_some<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    T: serde::Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    Deserialize::deserialize(deserializer).map(Some)
+}
+
+#[cfg(test)]
+mod test {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn deseriailze_logger_config() {
+        let config = deserialize_config(config());
+
+        let expected = LoggerConfig {
+            default: default::Config {
+                log_level: Some("debug".into()),
+                span_events: (fmt::format::FmtSpan::NEW | fmt::format::FmtSpan::CLOSE).into(),
+                color: config::Color::Enable,
+            },
+        };
+
+        assert_eq!(config, expected);
+    }
+
+    #[test]
+    fn deserialize_empty_config() {
+        let config = deserialize_config(empty_config());
+        assert_eq!(config, LoggerConfig::default());
+    }
+
+    #[test]
+    fn deserialize_logger_config_diff() {
+        let diff = deserialize_diff(config());
+
+        let expected = LoggerConfigDiff {
+            default: default::ConfigDiff {
+                log_level: Some(Some("debug".into())),
+                span_events: Some((fmt::format::FmtSpan::NEW | fmt::format::FmtSpan::CLOSE).into()),
+                color: Some(config::Color::Enable),
+            },
+        };
+
+        assert_eq!(diff, expected);
+    }
+
+    #[test]
+    fn deserialize_empty_diff() {
+        let diff = deserialize_diff(empty_config());
+        assert_eq!(diff, LoggerConfigDiff::default());
+    }
+
+    #[test]
+    fn deserialize_diff_with_explicit_nulls() {
+        let diff = deserialize_diff(json!({
+            "log_level": null,
+            "span_events": null,
+            "color": null,
+        }));
+
+        let expected = LoggerConfigDiff {
+            default: default::ConfigDiff {
+                log_level: Some(None),
+                ..Default::default()
+            },
+        };
+
+        assert_eq!(diff, expected);
+    }
+
+    fn deserialize_config(json: serde_json::Value) -> LoggerConfig {
+        serde_json::from_value(json).unwrap()
+    }
+
+    fn deserialize_diff(json: serde_json::Value) -> LoggerConfigDiff {
+        serde_json::from_value(json).unwrap()
+    }
+
+    fn config() -> serde_json::Value {
+        json!({
+            "log_level": "debug",
+            "span_events": ["new", "close"],
+            "color": true,
+        })
+    }
+
+    fn empty_config() -> serde_json::Value {
+        json!({})
+    }
 }
