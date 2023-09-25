@@ -2,6 +2,7 @@
 
 use std::fmt::Write as _;
 use std::io::{self, IsTerminal as _};
+use std::panic;
 use std::path::Path;
 use std::str::FromStr as _;
 use std::sync::Arc;
@@ -477,7 +478,7 @@ mod on_disk {
     >;
 
     // TODO: Specify `MakeWriter` type!
-    pub type MakeWriter = fn() -> io::Stdout;
+    pub type MakeWriter = tracing_appender::rolling::RollingFileAppender;
 
     pub fn new<S>(config: &mut Config) -> Option<Logger<S>>
     where
@@ -559,9 +560,21 @@ mod on_disk {
         config.update(diff);
     }
 
-    // TODO: Implement `MakeWriter` initialization!
     fn make_writer(log_file: impl AsRef<Path>) -> anyhow::Result<MakeWriter> {
-        Ok(io::stdout)
+        let log_file = log_file.as_ref();
+
+        let log_dir = log_file.parent().unwrap_or(Path::new(""));
+
+        let log_file_name = log_file.file_name().ok_or_else(|| {
+            anyhow::format_err!(
+                "'{}' log-file path does not contain a file name",
+                log_file.display()
+            )
+        })?;
+
+        // TODO: This does not seem to work for some reason... 🤔
+        panic::catch_unwind(|| tracing_appender::rolling::never(log_dir, log_file_name))
+            .map_err(|_| anyhow::format_err!("failed to open '{}' log-file", log_file.display()))
     }
 
     fn filter(user_filters: &str) -> filter::EnvFilter {
