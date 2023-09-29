@@ -78,10 +78,9 @@ impl LoggerHandle {
     pub async fn update_config(&self, diff: config::LoggerConfigDiff) -> anyhow::Result<()> {
         let mut config = self.config.write().await;
 
-        self.default
-            .modify(|logger| default::update(logger, &diff.default))?;
-
         config.default.update(diff.default);
+        let default = default::new(&config.default);
+        self.default.reload(default)?;
 
         Ok(())
     }
