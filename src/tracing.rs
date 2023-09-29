@@ -31,7 +31,14 @@ pub fn setup(config: &config::LoggerConfig) -> anyhow::Result<LoggerHandle> {
     // And default logger outputs colored log-lines, which on-disk logger reuse even if colors are
     // disabled for the on-disk logger. :/
 
-    let on_disk_logger = on_disk::new(&mut config.on_disk);
+    let on_disk_logger = match on_disk::new(&mut config.on_disk) {
+        Ok(on_disk_logger) => on_disk_logger,
+        Err(err) => {
+            eprintln!("{err}");
+            None
+        }
+    };
+
     let (on_disk_logger, on_disk_logger_handle) = reload::Layer::new(on_disk_logger);
     let reg = tracing_subscriber::registry().with(on_disk_logger);
 
@@ -121,7 +128,7 @@ impl LoggerHandle {
 
         let mut on_disk = None;
         self.on_disk.modify(|logger| on_disk = logger.take())?;
-        on_disk::update(&mut on_disk, &mut config.on_disk, diff.on_disk);
+        on_disk::update(&mut on_disk, &mut config.on_disk, diff.on_disk)?;
         self.on_disk.reload(on_disk)?;
 
         Ok(())
@@ -482,24 +489,23 @@ mod on_disk {
     // TODO: Specify `MakeWriter` type!
     pub type MakeWriter = tracing_appender::rolling::RollingFileAppender;
 
-    pub fn new<S>(config: &mut Config) -> Option<Logger<S>>
+    pub fn new<S>(config: &mut Config) -> anyhow::Result<Option<Logger<S>>>
     where
         S: tracing::Subscriber + for<'span> registry::LookupSpan<'span>,
     {
         if !config.enabled {
-            return None;
+            return Ok(None);
         }
 
         let make_writer = match make_writer(&config.log_file) {
             Ok(make_writer) => make_writer,
             Err(err) => {
-                eprintln!(
-                    "Failed to enable logging into '{}' log-file: {err}",
-                    config.log_file
-                );
-
                 config.enabled = false;
-                return None;
+
+                return Err(anyhow::format_err!(
+                    "failed to enable loggin into '{}' log-file: {err}",
+                    config.log_file,
+                ));
             }
         };
 
@@ -510,25 +516,33 @@ mod on_disk {
 
         let filter = filter(config.log_level.as_deref().unwrap_or(""));
 
-        Some(Some(layer).with_filter(filter))
+        let logger = Some(layer).with_filter(filter);
+
+        Ok(Some(logger))
     }
 
-    pub fn update<S>(logger: &mut Option<Logger<S>>, config: &mut Config, mut diff: ConfigDiff)
+    pub fn update<S>(
+        logger: &mut Option<Logger<S>>,
+        config: &mut Config,
+        mut diff: ConfigDiff,
+    ) -> anyhow::Result<()>
     where
         S: tracing::Subscriber + for<'span> registry::LookupSpan<'span>,
     {
         if let Some(enabled) = diff.enabled {
             if enabled != logger.is_some() {
                 config.update(diff);
-                *logger = new(config);
-                return;
+                *logger = new(config)?;
+                return Ok(());
             }
         }
 
         let Some(logger) = logger else {
             config.update(diff);
-            return;
+            return Ok(());
         };
+
+        let mut result = Ok(());
 
         if let Some(log_file) = &diff.log_file {
             match make_writer(log_file) {
@@ -543,7 +557,10 @@ mod on_disk {
                 }
 
                 Err(err) => {
-                    eprintln!("Failed to reconfigure logging into '{log_file}' log-file: {err}");
+                    result = Err(anyhow::format_err!(
+                        "failed to reconfigure logging into '{log_file}' log-file: {err}"
+                    ));
+
                     diff.log_file = None;
                 }
             }
@@ -560,6 +577,8 @@ mod on_disk {
         }
 
         config.update(diff);
+
+        result
     }
 
     fn make_writer(log_file: impl AsRef<Path>) -> anyhow::Result<MakeWriter> {
