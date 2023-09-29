@@ -486,7 +486,6 @@ mod on_disk {
         S,
     >;
 
-    // TODO: Specify `MakeWriter` type!
     pub type MakeWriter = tracing_appender::rolling::RollingFileAppender;
 
     pub fn new<S>(config: &mut Config) -> anyhow::Result<Option<Logger<S>>>
@@ -616,6 +615,7 @@ mod on_disk {
     fn filter(user_filters: &str) -> filter::EnvFilter {
         const DEFAULT_LOG_LEVEL: log::LevelFilter = log::LevelFilter::Debug;
 
+        // TODO: Tweak default filters for the on-disk logger? 🤔
         const DEFAULT_FILTERS: &[(&str, log::LevelFilter)] = &[
             ("hyper", log::LevelFilter::Info),
             ("h2", log::LevelFilter::Info),
