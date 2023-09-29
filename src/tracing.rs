@@ -119,8 +119,10 @@ impl LoggerHandle {
         let default = default::new(&config.default);
         self.default.reload(default)?;
 
-        self.on_disk
-            .modify(|logger| on_disk::update(logger, &mut config.on_disk, diff.on_disk))?;
+        let mut on_disk = None;
+        self.on_disk.modify(|logger| on_disk = logger.take())?;
+        on_disk::update(&mut on_disk, &mut config.on_disk, diff.on_disk);
+        self.on_disk.reload(on_disk)?;
 
         Ok(())
     }
@@ -572,9 +574,24 @@ mod on_disk {
             )
         })?;
 
-        // TODO: This does not seem to work for some reason... 🤔
-        panic::catch_unwind(|| tracing_appender::rolling::never(log_dir, log_file_name))
-            .map_err(|_| anyhow::format_err!("failed to open '{}' log-file", log_file.display()))
+        let result =
+            panic::catch_unwind(|| tracing_appender::rolling::never(log_dir, log_file_name));
+
+        let panic = match result {
+            Ok(make_writer) => return Ok(make_writer),
+            Err(panic) => panic,
+        };
+
+        if let Some(msg) = panic.downcast_ref::<&str>() {
+            Err(anyhow::format_err!("{msg}"))
+        } else if let Some(msg) = panic.downcast_ref::<String>() {
+            Err(anyhow::format_err!("{msg}"))
+        } else {
+            Err(anyhow::format_err!(
+                "failed to open '{}' log-file",
+                log_file.display()
+            ))
+        }
     }
 
     fn filter(user_filters: &str) -> filter::EnvFilter {
