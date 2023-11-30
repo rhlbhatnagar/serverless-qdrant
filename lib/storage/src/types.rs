@@ -21,16 +21,12 @@ pub type PeerAddressById = HashMap<PeerId, Uri>;
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct PerformanceConfig {
     pub max_search_threads: usize,
-    #[serde(default = "default_max_optimization_threads")]
+    #[serde(default)]
     pub max_optimization_threads: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_rate_limit: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub search_timeout_sec: Option<usize>,
-}
-
-const fn default_max_optimization_threads() -> usize {
-    1
 }
 
 /// Global configuration of the storage, loaded on the service launch, default stored in ./config
