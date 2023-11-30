@@ -1,6 +1,8 @@
 use std::cmp::max;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
+use common::cpu::CpuPermit;
 use common::types::PointOffsetType;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
@@ -8,6 +10,7 @@ use segment::common::operation_error::OperationResult;
 use segment::data_types::vectors::QueryVector;
 use segment::fixtures::payload_fixtures::STR_KEY;
 use segment::fixtures::sparse_fixtures::{fixture_open_sparse_index, fixture_sparse_index_ram};
+use segment::index::hnsw_index::max_rayon_threads;
 use segment::index::sparse_index::sparse_vector_index::SparseVectorIndex;
 use segment::index::{PayloadIndex, VectorIndex};
 use segment::types::PayloadFieldSchema::FieldType;
@@ -276,8 +279,11 @@ fn sparse_vector_index_ram_deleted_points_search() {
         sparse_vector_index.indexed_vector_count() - 1
     );
 
+    let permit_cpu_count = max_rayon_threads(0);
+    let permit = Arc::new(CpuPermit::dummy(permit_cpu_count as u32));
+
     // refresh index to remove point
-    sparse_vector_index.build_index(&stopped).unwrap();
+    sparse_vector_index.build_index(permit, &stopped).unwrap();
     assert_eq!(
         sparse_vector_index
             .id_tracker
@@ -468,11 +474,14 @@ fn handling_empty_sparse_vectors() {
             .vector_storage
             .borrow()
             .available_vector_count(),
-        NUM_VECTORS
+        NUM_VECTORS,
     );
 
+    let permit_cpu_count = max_rayon_threads(0);
+    let permit = Arc::new(CpuPermit::dummy(permit_cpu_count as u32));
+
     // empty vectors are not indexed
-    sparse_vector_index.build_index(&stopped).unwrap();
+    sparse_vector_index.build_index(permit, &stopped).unwrap();
     assert_eq!(sparse_vector_index.indexed_vector_count(), 0);
 
     let query_vector: QueryVector = random_sparse_vector(&mut rnd, MAX_SPARSE_DIM).into();

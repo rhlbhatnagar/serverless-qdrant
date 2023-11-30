@@ -242,8 +242,10 @@ mod tests {
     use std::collections::BTreeMap;
     use std::sync::Arc;
 
+    use common::cpu::CpuPermit;
     use parking_lot::RwLock;
     use segment::entry::entry_point::SegmentEntry;
+    use segment::index::hnsw_index::max_rayon_threads;
     use segment::types::{
         CompressionRatio, Distance, ProductQuantization, ProductQuantizationConfig,
         ScalarQuantizationConfig, ScalarType,
@@ -328,9 +330,17 @@ mod tests {
             Default::default(),
         );
 
+        let permit_cpu_count = max_rayon_threads(hnsw_config.max_indexing_threads);
+        let permit = CpuPermit::dummy(permit_cpu_count as u32);
+
         // Use indexing optimizer to build index for HNSW mismatch test
         let changed = index_optimizer
-            .optimize(locked_holder.clone(), vec![segment_id], &false.into())
+            .optimize(
+                locked_holder.clone(),
+                vec![segment_id],
+                permit,
+                &false.into(),
+            )
             .unwrap();
         assert!(changed, "optimizer should have rebuilt this segment");
         assert!(
@@ -351,11 +361,17 @@ mod tests {
         config_mismatch_optimizer.hnsw_config = changed_hnsw_config.clone();
 
         // Run mismatch optimizer again, make sure it optimizes now
+        let permit = CpuPermit::dummy(permit_cpu_count as u32);
         let suggested_to_optimize =
             config_mismatch_optimizer.check_condition(locked_holder.clone(), &Default::default());
         assert_eq!(suggested_to_optimize.len(), 1);
         let changed = config_mismatch_optimizer
-            .optimize(locked_holder.clone(), suggested_to_optimize, &false.into())
+            .optimize(
+                locked_holder.clone(),
+                suggested_to_optimize,
+                permit,
+                &false.into(),
+            )
             .unwrap();
         assert!(changed, "optimizer should have rebuilt this segment");
 
@@ -460,6 +476,9 @@ mod tests {
             payload_m: None,
         };
 
+        let permit_cpu_count = max_rayon_threads(hnsw_config_collection.max_indexing_threads);
+        let permit = CpuPermit::dummy(permit_cpu_count as u32);
+
         // Optimizers used in test
         let index_optimizer = IndexingOptimizer::new(
             thresholds_config.clone(),
@@ -480,7 +499,12 @@ mod tests {
 
         // Use indexing optimizer to build index for HNSW mismatch test
         let changed = index_optimizer
-            .optimize(locked_holder.clone(), vec![segment_id], &false.into())
+            .optimize(
+                locked_holder.clone(),
+                vec![segment_id],
+                permit,
+                &false.into(),
+            )
             .unwrap();
         assert!(changed, "optimizer should have rebuilt this segment");
         assert!(
@@ -509,11 +533,17 @@ mod tests {
         }
 
         // Run mismatch optimizer again, make sure it optimizes now
+        let permit = CpuPermit::dummy(permit_cpu_count as u32);
         let suggested_to_optimize =
             config_mismatch_optimizer.check_condition(locked_holder.clone(), &Default::default());
         assert_eq!(suggested_to_optimize.len(), 1);
         let changed = config_mismatch_optimizer
-            .optimize(locked_holder.clone(), suggested_to_optimize, &false.into())
+            .optimize(
+                locked_holder.clone(),
+                suggested_to_optimize,
+                permit,
+                &false.into(),
+            )
             .unwrap();
         assert!(changed, "optimizer should have rebuilt this segment");
 
@@ -643,9 +673,17 @@ mod tests {
             Some(quantization_config_collection),
         );
 
+        let permit_cpu_count = max_rayon_threads(0);
+        let permit = CpuPermit::dummy(permit_cpu_count as u32);
+
         // Use indexing optimizer to build index for quantization mismatch test
         let changed = index_optimizer
-            .optimize(locked_holder.clone(), vec![segment_id], &false.into())
+            .optimize(
+                locked_holder.clone(),
+                vec![segment_id],
+                permit,
+                &false.into(),
+            )
             .unwrap();
         assert!(changed, "optimizer should have rebuilt this segment");
         assert!(
@@ -677,11 +715,17 @@ mod tests {
         }
 
         // Run mismatch optimizer again, make sure it optimizes now
+        let permit = CpuPermit::dummy(permit_cpu_count as u32);
         let suggested_to_optimize =
             config_mismatch_optimizer.check_condition(locked_holder.clone(), &Default::default());
         assert_eq!(suggested_to_optimize.len(), 1);
         let changed = config_mismatch_optimizer
-            .optimize(locked_holder.clone(), suggested_to_optimize, &false.into())
+            .optimize(
+                locked_holder.clone(),
+                suggested_to_optimize,
+                permit,
+                &false.into(),
+            )
             .unwrap();
         assert!(changed, "optimizer should have rebuilt this segment");
 
