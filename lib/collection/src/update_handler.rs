@@ -12,7 +12,7 @@ use segment::index::hnsw_index::max_rayon_threads;
 use segment::types::SeqNumberType;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc::{self, Receiver, Sender};
-use tokio::sync::{oneshot, Mutex as TokioMutex, TryAcquireError, Semaphore};
+use tokio::sync::{oneshot, Mutex as TokioMutex, Semaphore, TryAcquireError};
 use tokio::task::JoinHandle;
 use tokio::time::error::Elapsed;
 use tokio::time::{timeout, Duration};
@@ -259,7 +259,11 @@ impl UpdateHandler {
                 let Some(permit) = OPTIMIZER_CPU_BUDGET.try_aquire(desired_cpus) else {
                     break;
                 };
-                log::trace!("Aquired {} CPU permit for {} optimizer", permit.num_cpus, optimizer.name());
+                log::trace!(
+                    "Aquired {} CPU permit for {} optimizer",
+                    permit.num_cpus,
+                    optimizer.name(),
+                );
 
                 let optimizer = optimizer.clone();
                 let optimizers_log = optimizers_log.clone();
@@ -279,7 +283,12 @@ impl UpdateHandler {
                             optimizers_log.lock().register(tracker);
 
                             // Optimize and handle result
-                            match optimizer.as_ref().optimize(segments.clone(), nsi, permit, stopped) {
+                            match optimizer.as_ref().optimize(
+                                segments.clone(),
+                                nsi,
+                                permit,
+                                stopped,
+                            ) {
                                 // Perform some actions when optimization if finished
                                 Ok(result) => {
                                     tracker_handle.update(TrackerStatus::Done);
