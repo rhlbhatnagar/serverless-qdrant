@@ -108,7 +108,7 @@ pub struct UpdateHandler {
     /// Defaults to `u64::MAX` to allow acknowledging all confirmed versions.
     pub(super) max_ack_version: Arc<AtomicU64>,
     optimization_handles: Arc<TokioMutex<Vec<StoppableTaskHandle<bool>>>>,
-    max_optimization_threads: usize,
+    max_optimization_threads: Option<usize>,
 }
 
 impl UpdateHandler {
@@ -121,7 +121,7 @@ impl UpdateHandler {
         segments: LockedSegmentHolder,
         wal: LockedWal,
         flush_interval_sec: u64,
-        max_optimization_threads: usize,
+        max_optimization_threads: Option<usize>,
     ) -> UpdateHandler {
         UpdateHandler {
             shared_storage_config,
@@ -416,8 +416,10 @@ impl UpdateHandler {
         wal: LockedWal,
         optimization_handles: Arc<TokioMutex<Vec<StoppableTaskHandle<bool>>>>,
         optimizers_log: Arc<Mutex<TrackerLog>>,
-        max_handles: usize,
+        max_handles: Option<usize>,
     ) {
+        let max_handles = max_handles.unwrap_or(usize::MAX);
+
         loop {
             let receiver = timeout(OPTIMIZER_CLEANUP_INTERVAL, receiver.recv());
             let result = receiver.await;
