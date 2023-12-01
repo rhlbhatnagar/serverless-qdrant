@@ -108,6 +108,7 @@ pub struct UpdateHandler {
     /// Defaults to `u64::MAX` to allow acknowledging all confirmed versions.
     pub(super) max_ack_version: Arc<AtomicU64>,
     optimization_handles: Arc<TokioMutex<Vec<StoppableTaskHandle<bool>>>>,
+    /// Maximum number of concurrent optimization jobs.
     max_optimization_threads: Option<usize>,
 }
 
@@ -614,6 +615,10 @@ impl UpdateHandler {
     }
 }
 
+/// Structure managing global CPU budget for optimization tasks.
+///
+/// Assigns CPU permits to tasks to limit overall resource utilization, making optimization
+/// workloads more predictable and efficient.
 struct CpuBudget {
     semaphore: Arc<Semaphore>,
 }
