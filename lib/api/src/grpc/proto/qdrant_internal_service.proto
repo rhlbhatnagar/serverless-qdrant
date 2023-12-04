@@ -6,7 +6,7 @@ option csharp_namespace = "Qdrant.Client.Grpc";
 service QdrantInternal {
   /*
   Wait until the target node reached the given commit ID.
-   */
+  */
   rpc WaitOnConsensusCommit (WaitOnConsensusCommitRequest) returns (WaitOnConsensusCommitResponse) {}
 }
 
