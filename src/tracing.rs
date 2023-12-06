@@ -1,7 +1,6 @@
 #![allow(dead_code)] // `schema_generator` binary target produce warnings
 
 use std::fmt::Write as _;
-use std::io::{self, IsTerminal as _};
 use std::str::FromStr as _;
 use std::sync::Arc;
 
@@ -75,12 +74,32 @@ impl LoggerHandle {
         self.config.read().await.clone()
     }
 
-    pub async fn update_config(&self, diff: config::LoggerConfigDiff) -> anyhow::Result<()> {
+    pub async fn update_config(&self, mut diff: config::LoggerConfigDiff) -> anyhow::Result<()> {
         let mut config = self.config.write().await;
 
+        // `tracing-subscriber` does not support `reload`ing `Filtered` layers, so we *have to* use
+        // `modify`. However, `modify` would *deadlock* if provided closure logs anything or produce
+        // any `tracing` event.
+        //
+        // So, we structure `update_config` to only do an absolute minimum of changes and only use
+        // the most trivial operations during `modify`, to guarantee we won't deadlock.
+        //
+        // See:
+        // - https://docs.rs/tracing-subscriber/latest/tracing_subscriber/reload/struct.Handle.html#method.reload
+        // - https://github.com/tokio-rs/tracing/issues/1629
+        // - https://github.com/tokio-rs/tracing/pull/2657
+
+        // Only update `config` field, if `diff` contains *new* value
+        diff.filter(&config);
+
+        // Parse `diff` and prepare `update` *outside* of `modify` call
+        if let Some(update) = diff.default.prepare_update() {
+            // Apply prepared `update` using trivial code that should never trigger a deadlock
+            self.default.modify(move |logger| update.apply(logger))?;
+        }
+
+        // Update `config`
         config.default.update(diff.default);
-        let default = default::new(&config.default);
-        self.default.reload(default)?;
 
         Ok(())
     }
@@ -121,6 +140,12 @@ pub mod config {
         pub default: default::ConfigDiff,
     }
 
+    impl LoggerConfigDiff {
+        pub fn filter(&mut self, config: &LoggerConfig) {
+            self.default.filter(&config.default);
+        }
+    }
+
     #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, SmartDefault)]
     #[serde(from = "helpers::SpanEvents", into = "helpers::SpanEvents")]
     pub struct SpanEvents {
@@ -152,11 +177,7 @@ pub mod config {
     impl Color {
         pub fn to_bool(self) -> bool {
             match self {
-                Self::Auto => {
-                    io::stdout().is_terminal()
-                        && colored::control::SHOULD_COLORIZE.should_colorize()
-                }
-
+                Self::Auto => colored::control::SHOULD_COLORIZE.should_colorize(),
                 Self::Enable => true,
                 Self::Disable => false,
             }
@@ -327,6 +348,34 @@ mod default {
         pub color: Option<config::Color>,
     }
 
+    impl ConfigDiff {
+        pub fn has_changes(&self) -> bool {
+            self.log_level.is_some() || self.span_events.is_some() || self.color.is_some()
+        }
+
+        pub fn filter(&mut self, config: &Config) {
+            if self.log_level.as_ref() == Some(&config.log_level) {
+                self.log_level = None;
+            }
+
+            if self.span_events.as_ref() == Some(&config.span_events) {
+                self.span_events = None;
+            }
+
+            if self.color.as_ref() == Some(&config.color) {
+                self.color = None;
+            }
+        }
+
+        pub fn prepare_update(&self) -> Option<Update> {
+            if self.has_changes() {
+                Some(Update::from_diff(self))
+            } else {
+                None
+            }
+        }
+    }
+
     #[rustfmt::skip] // `rustfmt` formats this into unreadable single line
     pub type Logger<S> = filter::Filtered<
         Option<fmt::Layer<S>>,
@@ -347,23 +396,53 @@ mod default {
         Some(layer).with_filter(filter)
     }
 
-    pub fn update<S>(logger: &mut Logger<S>, diff: &ConfigDiff) {
-        if let Some(user_filters) = &diff.log_level {
-            *logger.filter_mut() = filter(user_filters.as_deref().unwrap_or(""));
+    #[derive(Debug, Default)]
+    pub struct Update {
+        filter: Option<filter::EnvFilter>,
+        span_events: Option<fmt::format::FmtSpan>,
+        ansi: Option<bool>,
+    }
+
+    impl Update {
+        pub fn from_diff(diff: &ConfigDiff) -> Self {
+            let mut update = Self::default();
+            update.prepare(diff);
+            update
         }
 
-        if let Some(span_events) = diff.span_events.clone() {
-            let mut layer = logger.inner_mut().take().expect("valid logger state");
-            layer = layer.with_span_events(span_events.into());
-            *logger.inner_mut() = Some(layer);
+        fn prepare(&mut self, diff: &ConfigDiff) {
+            if let Some(log_level) = &diff.log_level {
+                self.filter = Some(filter(log_level.as_deref().unwrap_or("")));
+            }
+
+            if let Some(span_events) = diff.span_events.clone() {
+                self.span_events = Some(span_events.into())
+            }
+
+            if let Some(color) = diff.color {
+                self.ansi = Some(color.to_bool());
+            }
         }
 
-        if let Some(color) = diff.color {
-            logger
-                .inner_mut()
-                .as_mut()
-                .expect("valid logger state")
-                .set_ansi(color.to_bool());
+        // `apply` should *never* log anything or produce any `tracing` events!
+        pub fn apply<S>(self, logger: &mut Logger<S>) {
+            if let Some(filter) = self.filter {
+                *logger.filter_mut() = filter;
+            }
+
+            if let Some(span_events) = self.span_events {
+                let mut layer = logger.inner_mut().take().expect("valid logger state");
+                layer = layer.with_span_events(span_events);
+                *logger.inner_mut() = Some(layer);
+            }
+
+            if let Some(ansi) = self.ansi {
+                logger
+                    .inner_mut()
+                    .as_mut()
+                    .expect("valid logger state")
+                    .set_ansi(ansi);
+            }
         }
     }
 
