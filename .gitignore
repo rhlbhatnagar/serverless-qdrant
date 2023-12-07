@@ -11,4 +11,5 @@
 /static
 *.log
 .qdrant-initialized
-/.hypothesis
+.DS_Store
+/node_modules
