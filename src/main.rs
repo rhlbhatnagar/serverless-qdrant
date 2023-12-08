@@ -10,9 +10,21 @@ use ::tonic::transport::Uri;
 use api::grpc::transport_channel_pool::TransportChannelPool;
 use clap::Parser;
 use collection::shards::channel_service::ChannelService;
+use qdrant::common::helpers::{
+    create_general_purpose_runtime, create_search_runtime, create_update_runtime,
+    load_tls_client_config,
+};
+use qdrant::common::telemetry::TelemetryCollector;
+use qdrant::common::telemetry_reporting::TelemetryReporter;
 use qdrant::consensus::Consensus;
+use qdrant::greeting::welcome;
+use qdrant::migrations::single_to_cluster::handle_existing_collections;
+use qdrant::settings::Settings;
+use qdrant::snapshots::{recover_full_snapshot, recover_snapshots};
+use qdrant::startup::{
+    remove_started_file_indicator, setup_panic_hook, touch_started_file_indicator,
+};
 use slog::Drain;
-use qdrant::startup::setup_panic_hook;
 use storage::content_manager::consensus::operation_sender::OperationSender;
 use storage::content_manager::consensus::persistent::Persistent;
 use storage::content_manager::consensus_manager::{ConsensusManager, ConsensusStateRef};
@@ -21,18 +33,6 @@ use storage::content_manager::toc::TableOfContent;
 use storage::dispatcher::Dispatcher;
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
-
-use qdrant::common::helpers::{
-    create_general_purpose_runtime, create_search_runtime, create_update_runtime,
-    load_tls_client_config,
-};
-use qdrant::common::telemetry::TelemetryCollector;
-use qdrant::common::telemetry_reporting::TelemetryReporter;
-use qdrant::greeting::welcome;
-use qdrant::migrations::single_to_cluster::handle_existing_collections;
-use qdrant::settings::Settings;
-use qdrant::snapshots::{recover_full_snapshot, recover_snapshots};
-use qdrant::startup::{remove_started_file_indicator, touch_started_file_indicator};
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]

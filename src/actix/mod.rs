@@ -52,7 +52,7 @@ pub async fn init_lambda(
     telemetry_collector: Arc<tokio::sync::Mutex<TelemetryCollector>>,
     ready: Option<Arc<health::HealthChecker>>,
     settings: Settings,
-) -> io::Result<()>  {
+) -> io::Result<()> {
     let toc_data = web::Data::from(dispatcher.toc().clone());
     let dispatcher_data = web::Data::from(dispatcher);
     let actix_telemetry_collector = telemetry_collector
@@ -160,7 +160,6 @@ pub async fn init_lambda(
         }
         app
     };
-        
 
     let port = settings.service.http_port;
     let bind_addr = format!("{}:{}", settings.service.host, port);

@@ -1143,12 +1143,14 @@ mod tests {
         let mut settings = crate::settings::Settings::new(None).expect("Can't read config.");
         settings.storage.storage_path = storage_dir.path().to_str().unwrap().to_string();
         tracing_subscriber::fmt::init();
-        let search_runtime =
-            crate::common::helpers::create_search_runtime(settings.storage.performance.max_search_threads)
-                .expect("Can't create search runtime.");
-        let update_runtime =
-            crate::common::helpers::create_update_runtime(settings.storage.performance.max_search_threads)
-                .expect("Can't create update runtime.");
+        let search_runtime = crate::common::helpers::create_search_runtime(
+            settings.storage.performance.max_search_threads,
+        )
+        .expect("Can't create search runtime.");
+        let update_runtime = crate::common::helpers::create_update_runtime(
+            settings.storage.performance.max_search_threads,
+        )
+        .expect("Can't create update runtime.");
         let general_runtime =
             create_general_purpose_runtime().expect("Can't create general purpose runtime.");
         let handle = general_runtime.handle().clone();

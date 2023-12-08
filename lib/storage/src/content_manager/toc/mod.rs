@@ -80,7 +80,6 @@ pub struct TableOfContent {
 }
 
 impl TableOfContent {
-
     #[allow(clippy::too_many_arguments)]
     pub async fn new_sync(
         storage_config: &StorageConfig,
@@ -153,7 +152,8 @@ impl TableOfContent {
                 ),
                 Some(search_runtime.handle().clone()),
                 Some(update_runtime.handle().clone()),
-            ).await;
+            )
+            .await;
 
             collections.insert(collection_name, collection);
         }

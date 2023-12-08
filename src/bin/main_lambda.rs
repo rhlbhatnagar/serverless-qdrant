@@ -1,18 +1,10 @@
 #![allow(deprecated)]
 
-
 use std::sync::Arc;
 
 use ::tonic::transport::Uri;
 use clap::Parser;
 use collection::shards::channel_service::ChannelService;
-use qdrant::startup::setup_panic_hook;
-use storage::content_manager::consensus::persistent::Persistent;
-use storage::content_manager::toc::TableOfContent;
-use storage::dispatcher::Dispatcher;
-#[cfg(not(target_env = "msvc"))]
-use tikv_jemallocator::Jemalloc;
-
 use qdrant::common::helpers::{
     create_general_purpose_runtime, create_search_runtime, create_update_runtime,
 };
@@ -20,7 +12,14 @@ use qdrant::common::telemetry::TelemetryCollector;
 use qdrant::common::telemetry_reporting::TelemetryReporter;
 use qdrant::greeting::welcome;
 use qdrant::settings::Settings;
-use qdrant::startup::{remove_started_file_indicator, touch_started_file_indicator};
+use qdrant::startup::{
+    remove_started_file_indicator, setup_panic_hook, touch_started_file_indicator,
+};
+use storage::content_manager::consensus::persistent::Persistent;
+use storage::content_manager::toc::TableOfContent;
+use storage::dispatcher::Dispatcher;
+#[cfg(not(target_env = "msvc"))]
+use tikv_jemallocator::Jemalloc;
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
@@ -108,7 +107,7 @@ async fn main() -> anyhow::Result<()> {
 
     let reporting_id = TelemetryCollector::generate_id();
 
-   qdrant::tracing::setup(&settings.log_level)?;
+    qdrant::tracing::setup(&settings.log_level)?;
 
     setup_panic_hook(reporting_enabled, reporting_id.to_string());
 
@@ -131,7 +130,6 @@ async fn main() -> anyhow::Result<()> {
     let persistent_consensus_state =
         Persistent::load_or_init(&settings.storage.storage_path, args.bootstrap.is_none())?;
 
- 
     // Create and own search runtime out of the scope of async context to ensure correct
     // destruction of it
     let search_runtime = create_search_runtime(settings.storage.performance.max_search_threads)
@@ -145,19 +143,18 @@ async fn main() -> anyhow::Result<()> {
         create_general_purpose_runtime().expect("Can't optimizer general purpose runtime.");
     let runtime_handle = general_runtime.handle().clone();
 
-
     // Table of content manages the list of collections.
     // It is a main entry point for the storage.
     let toc = TableOfContent::new_sync(
-            &settings.storage,
-            search_runtime,
-            update_runtime,
-            general_runtime,
-            ChannelService::new(settings.service.http_port),
-            persistent_consensus_state.this_peer_id(),
-            None,
-        ).await;
-
+        &settings.storage,
+        search_runtime,
+        update_runtime,
+        general_runtime,
+        ChannelService::new(settings.service.http_port),
+        persistent_consensus_state.this_peer_id(),
+        None,
+    )
+    .await;
 
     toc.clear_all_tmp_directories()?;
 
@@ -165,7 +162,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Router for external queries.
     // It decides if query should go directly to the ToC or through the consensus.
-    let  dispatcher = Dispatcher::new(toc_arc.clone());
+    let dispatcher = Dispatcher::new(toc_arc.clone());
 
     let (telemetry_collector, dispatcher_arc) = {
         log::info!("Distributed mode disabled");
@@ -176,7 +173,6 @@ async fn main() -> anyhow::Result<()> {
             TelemetryCollector::new(settings.clone(), dispatcher_arc.clone(), reporting_id);
         (telemetry_collector, dispatcher_arc)
     };
-
 
     //
     // Telemetry reporting
@@ -193,7 +189,6 @@ async fn main() -> anyhow::Result<()> {
         log::info!("Telemetry reporting disabled");
     }
 
-
     //
     // REST API server, currently standalone mode only supports web
     //
@@ -203,7 +198,9 @@ async fn main() -> anyhow::Result<()> {
         touch_started_file_indicator();
         let dispatcher_arc = dispatcher_arc.clone();
         let settings = settings.clone();
-        let _ =  qdrant::actix::init_lambda(dispatcher_arc.clone(), telemetry_collector, None, settings).await;
+        let _ =
+            qdrant::actix::init_lambda(dispatcher_arc.clone(), telemetry_collector, None, settings)
+                .await;
     }
 
     //
@@ -211,15 +208,12 @@ async fn main() -> anyhow::Result<()> {
     //
 
     log::info!("gRPC endpoint disabled");
-    
 
-     //
+    //
     // service debug
     //
 
     log::info!("service debug disabled");
-    
-
 
     drop(toc_arc);
     drop(settings);
