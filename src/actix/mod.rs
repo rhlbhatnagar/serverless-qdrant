@@ -17,6 +17,7 @@ use actix_multipart::form::MultipartFormConfig;
 use actix_web::middleware::{Compress, Condition, Logger};
 use actix_web::{error, get, web, App, HttpRequest, HttpResponse, HttpServer, Responder};
 use collection::operations::validation;
+use lambda_web::{is_running_on_lambda, run_actix_on_lambda};
 use storage::dispatcher::Dispatcher;
 
 use crate::actix::api::cluster_api::config_cluster_api;
@@ -43,6 +44,138 @@ const WEB_UI_PATH: &str = "/dashboard";
 #[get("/")]
 pub async fn index() -> impl Responder {
     HttpResponse::Ok().json(VersionInfo::default())
+}
+
+#[allow(dead_code)]
+pub async fn init_lambda(
+    dispatcher: Arc<Dispatcher>,
+    telemetry_collector: Arc<tokio::sync::Mutex<TelemetryCollector>>,
+    ready: Option<Arc<health::HealthChecker>>,
+    settings: Settings,
+) -> io::Result<()> {
+    let toc_data = web::Data::from(dispatcher.toc().clone());
+    let dispatcher_data = web::Data::from(dispatcher);
+    let actix_telemetry_collector = telemetry_collector
+        .lock()
+        .await
+        .actix_telemetry_collector
+        .clone();
+    let telemetry_collector_data = web::Data::from(telemetry_collector);
+    let http_client = web::Data::new(HttpClient::from_settings(&settings)?);
+    let ready = web::Data::new(ready);
+    let auth_keys = AuthKeys::try_create(&settings.service);
+    let static_folder = settings
+        .service
+        .static_content_dir
+        .clone()
+        .unwrap_or(DEFAULT_STATIC_DIR.to_string());
+
+    let web_ui_enabled = settings.service.enable_static_content.unwrap_or(true);
+    // validate that the static folder exists IF the web UI is enabled
+    let web_ui_available = if web_ui_enabled {
+        let static_folder = Path::new(&static_folder);
+        if !static_folder.exists() || !static_folder.is_dir() {
+            // enabled BUT folder does not exist
+            log::warn!(
+                "Static content folder for Web UI '{}' does not exist",
+                static_folder.display(),
+            );
+            false
+        } else {
+            // enabled AND folder exists
+            true
+        }
+    } else {
+        // not enabled
+        false
+    };
+
+    let mut api_key_whitelist = vec![
+        WhitelistItem::exact("/"),
+        WhitelistItem::exact("/healthz"),
+        WhitelistItem::prefix("/readyz"),
+        WhitelistItem::prefix("/livez"),
+    ];
+    if web_ui_available {
+        api_key_whitelist.push(WhitelistItem::prefix(WEB_UI_PATH));
+    }
+
+    let upload_dir = dispatcher_data.upload_dir().unwrap();
+
+    let factory = move || {
+        let cors = Cors::default()
+            .allow_any_origin()
+            .allow_any_method()
+            .allow_any_header();
+        let validate_path_config = actix_web_validator::PathConfig::default()
+            .error_handler(|err, rec| validation_error_handler("path parameters", err, rec));
+        let validate_query_config = actix_web_validator::QueryConfig::default()
+            .error_handler(|err, rec| validation_error_handler("query parameters", err, rec));
+        let validate_json_config = actix_web_validator::JsonConfig::default()
+            .limit(settings.service.max_request_size_mb * 1024 * 1024)
+            .error_handler(|err, rec| validation_error_handler("JSON body", err, rec));
+
+        let mut app = App::new()
+            .wrap(Compress::default()) // Reads the `Accept-Encoding` header to negotiate which compression codec to use.
+            // api_key middleware
+            // note: the last call to `wrap()` or `wrap_fn()` is executed first
+            .wrap(Condition::new(
+                auth_keys.is_some(),
+                ApiKey::new(auth_keys.clone(), api_key_whitelist.clone()),
+            ))
+            .wrap(Condition::new(settings.service.enable_cors, cors))
+            .wrap(Logger::default().exclude("/")) // Avoid logging healthcheck requests
+            .wrap(actix_telemetry::ActixTelemetryTransform::new(
+                actix_telemetry_collector.clone(),
+            ))
+            .app_data(dispatcher_data.clone())
+            .app_data(toc_data.clone())
+            .app_data(telemetry_collector_data.clone())
+            .app_data(http_client.clone())
+            .app_data(ready.clone())
+            .app_data(validate_path_config)
+            .app_data(validate_query_config)
+            .app_data(validate_json_config)
+            .app_data(TempFileConfig::default().directory(&upload_dir))
+            .app_data(MultipartFormConfig::default().total_limit(usize::MAX))
+            .service(index)
+            .configure(config_collections_api)
+            .configure(config_snapshots_api)
+            .configure(config_update_api)
+            .configure(config_cluster_api)
+            .configure(config_service_api)
+            .configure(config_search_api)
+            .configure(config_recommend_api)
+            .configure(config_discovery_api)
+            .configure(config_shards_api)
+            .service(get_point)
+            .service(get_points)
+            .service(scroll_points)
+            .service(count_points);
+
+        if web_ui_available {
+            app = app.service(
+                actix_files::Files::new(WEB_UI_PATH, &static_folder).index_file("index.html"),
+            )
+        }
+        app
+    };
+
+    let port = settings.service.http_port;
+    let bind_addr = format!("{}:{}", settings.service.host, port);
+
+    if is_running_on_lambda() {
+        // Run on AWS Lambda
+        run_actix_on_lambda(factory).await.unwrap();
+    } else {
+        // Local server
+        HttpServer::new(factory)
+            .bind(bind_addr)?
+            .workers(max_web_workers(&settings))
+            .run()
+            .await?;
+    }
+    Ok(())
 }
 
 #[allow(dead_code)]
