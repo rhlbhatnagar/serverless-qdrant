@@ -80,6 +80,123 @@ pub struct TableOfContent {
 }
 
 impl TableOfContent {
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn new_sync(
+        storage_config: &StorageConfig,
+        search_runtime: Runtime,
+        update_runtime: Runtime,
+        general_runtime: Runtime,
+        channel_service: ChannelService,
+        this_peer_id: PeerId,
+        consensus_proposal_sender: Option<OperationSender>,
+    ) -> Self {
+        let snapshots_path = Path::new(&storage_config.snapshots_path.clone()).to_owned();
+        create_dir_all(&snapshots_path).expect("Can't create Snapshots directory");
+        let collections_path = Path::new(&storage_config.storage_path).join(COLLECTIONS_DIR);
+        create_dir_all(&collections_path).expect("Can't create Collections directory");
+        if let Some(path) = storage_config.temp_path.as_deref() {
+            let temp_path = Path::new(path);
+            create_dir_all(temp_path).expect("Can't create temporary files directory");
+        }
+        let collection_paths =
+            read_dir(&collections_path).expect("Can't read Collections directory");
+        let mut collections: HashMap<String, Collection> = Default::default();
+        let is_distributed = consensus_proposal_sender.is_some();
+        for entry in collection_paths {
+            let collection_path = entry
+                .expect("Can't access of one of the collection files")
+                .path();
+
+            if !CollectionConfig::check(&collection_path) {
+                log::warn!(
+                    "Collection config is not found in the collection directory: {:?}, skipping",
+                    collection_path
+                );
+                continue;
+            }
+
+            let collection_name = collection_path
+                .file_name()
+                .expect("Can't resolve a filename of one of the collection files")
+                .to_str()
+                .expect("A filename of one of the collection files is not a valid UTF-8")
+                .to_string();
+            let collection_snapshots_path =
+                Self::collection_snapshots_path(&snapshots_path, &collection_name);
+            create_dir_all(&collection_snapshots_path).unwrap_or_else(|e| {
+                panic!("Can't create a directory for snapshot of {collection_name}: {e}")
+            });
+            log::info!("Loading collection: {}", collection_name);
+            let collection = Collection::load(
+                collection_name.clone(),
+                this_peer_id,
+                &collection_path,
+                &collection_snapshots_path,
+                storage_config
+                    .to_shared_storage_config(is_distributed)
+                    .into(),
+                channel_service.clone(),
+                Self::change_peer_state_callback(
+                    consensus_proposal_sender.clone(),
+                    collection_name.clone(),
+                    ReplicaState::Dead,
+                    None,
+                ),
+                Self::request_shard_transfer_callback(
+                    consensus_proposal_sender.clone(),
+                    collection_name.clone(),
+                ),
+                Self::abort_shard_transfer_callback(
+                    consensus_proposal_sender.clone(),
+                    collection_name.clone(),
+                ),
+                Some(search_runtime.handle().clone()),
+                Some(update_runtime.handle().clone()),
+            ).await;
+
+            collections.insert(collection_name, collection);
+        }
+        let alias_path = Path::new(&storage_config.storage_path).join(ALIASES_PATH);
+        let alias_persistence =
+            AliasPersistence::open(alias_path).expect("Can't open database by the provided config");
+
+        let rate_limiter = match storage_config.performance.update_rate_limit {
+            Some(limit) => Some(Semaphore::new(limit)),
+            None => {
+                if consensus_proposal_sender.is_some() {
+                    // Auto adjust the rate limit in distributed mode.
+                    // Select number of working threads as a guess.
+                    let limit = max(get_num_cpus(), 2);
+                    log::debug!(
+                        "Auto adjusting update rate limit to {} parallel update requests",
+                        limit
+                    );
+                    Some(Semaphore::new(limit))
+                } else {
+                    None
+                }
+            }
+        };
+
+        TableOfContent {
+            collections: Arc::new(RwLock::new(collections)),
+            storage_config: Arc::new(storage_config.clone()),
+            search_runtime,
+            update_runtime,
+            general_runtime,
+            alias_persistence: RwLock::new(alias_persistence),
+            this_peer_id,
+            channel_service,
+            consensus_proposal_sender,
+            is_write_locked: AtomicBool::new(false),
+            lock_error_message: parking_lot::Mutex::new(None),
+            update_rate_limiter: rate_limiter,
+            collection_create_lock: Default::default(),
+            shard_transfer_dispatcher: Default::default(),
+        }
+    }
+
     /// PeerId does not change during execution so it is ok to copy it here.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
