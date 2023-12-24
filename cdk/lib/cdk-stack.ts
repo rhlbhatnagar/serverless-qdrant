@@ -81,7 +81,13 @@ export class QdrantLambdaStack extends Stack {
       timeout: Duration.seconds(30),
       logRetention: RetentionDays.ONE_MONTH,
       memorySize: 3000, // 3 GB memory
-      //reservedConcurrentExecutions: 1, // Write lambda has a forced concurrency of 1, TODO, uncomment it once the concurrency limit is increased.
+      // IMP: On fresh AWS accounts the min and max lambda concurrency limit is 10,
+      // If that's the case won't be able to reserve a concurrent execution for this lambda as it will
+      // take your free lambda limit to below your minimum limit.
+      // (read more: https://stackoverflow.com/questions/73988837/aws-specified-concurrentexecutions-for-function-decreases-accounts-unreservedc)
+      // So you might need to request an increase in your max concurrency limit from AWS service quotas.
+      // https://console.aws.amazon.com/servicequotas/home
+      reservedConcurrentExecutions: 1, // Write lambda has a forced concurrency of 1,
       code: Code.fromAsset("../target/lambda/main_lambda/bootstrap.zip"),
       filesystem: LambdaFilesystem.fromEfsAccessPoint(accessPoint, "/mnt/efs"),
       vpc: vpc,
