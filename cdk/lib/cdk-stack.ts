@@ -2,26 +2,16 @@ import { Construct } from "constructs";
 import { HttpLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
 
 import {
-  Architecture,
   Code,
   Function,
-  Runtime,
   FileSystem as LambdaFilesystem,
 } from "aws-cdk-lib/aws-lambda";
 import { FileSystem, AccessPoint } from "aws-cdk-lib/aws-efs";
 
-import { RetentionDays } from "aws-cdk-lib/aws-logs";
-import {
-  Stack,
-  StackProps,
-  Duration,
-  App,
-  RemovalPolicy,
-  CfnOutput,
-} from "aws-cdk-lib";
-import { HttpApi } from "aws-cdk-lib/aws-apigatewayv2";
+import { Stack, StackProps, RemovalPolicy, CfnOutput } from "aws-cdk-lib";
+import { HttpApi, HttpRoute, HttpRouteKey } from "aws-cdk-lib/aws-apigatewayv2";
 import { Vpc } from "aws-cdk-lib/aws-ec2";
-import { Lambda } from "aws-cdk-lib/aws-ses-actions";
+import { commonLambdaParams, writeEndpoints } from "./config";
 
 export class QdrantLambdaStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
@@ -32,12 +22,12 @@ export class QdrantLambdaStack extends Stack {
     // Create a new EFS filesystem
     const fileSystem = new FileSystem(this, "LambdaEfs", {
       vpc,
-      removalPolicy: RemovalPolicy.DESTROY, // adjust this as needed
+      removalPolicy: RemovalPolicy.DESTROY,
     });
 
     const accessPoint = new AccessPoint(this, "AccessPoint", {
       fileSystem,
-      path: "/export/lambda", // adjust this as needed
+      path: "/export/lambda",
       createAcl: {
         ownerUid: "1001",
         ownerGid: "1001",
@@ -49,24 +39,51 @@ export class QdrantLambdaStack extends Stack {
       },
     });
 
-    const qdrantLambda = new Function(this, "QdrantLambda", {
-      runtime: Runtime.PROVIDED_AL2023,
-      handler: "not.required",
-      architecture: Architecture.ARM_64,
-      timeout: Duration.seconds(30),
-      logRetention: RetentionDays.ONE_MONTH,
-      memorySize: 3000, // 3 GB memory
+    const qdrantReadLambda = new Function(this, "QdrantReadLambda", {
+      ...commonLambdaParams,
       code: Code.fromAsset("../target/lambda/main_lambda/bootstrap.zip"),
       filesystem: LambdaFilesystem.fromEfsAccessPoint(accessPoint, "/mnt/efs"),
       vpc: vpc,
     });
 
-    // HTTP API Gateway
+    // IMP: On fresh AWS accounts the min concurrency limit = max lambda concurrency = 10,
+    // If that's the case won't be able to reserve a concurrent execution for this lambda
+    // as this takes your free lambda limit (max - reserved) < min.
+
+    // So you might need to request in your max concurrency limit.
+    // https://console.aws.amazon.com/servicequotas/home
+
+    const qdrantWriteLambda = new Function(this, "QdrantWriteLambda", {
+      ...commonLambdaParams,
+      // Write lambda has a forced concurrency of 1. So don't run into race conditions on the network file system.
+      reservedConcurrentExecutions: 1,
+      code: Code.fromAsset("../target/lambda/main_lambda/bootstrap.zip"),
+      filesystem: LambdaFilesystem.fromEfsAccessPoint(accessPoint, "/mnt/efs"),
+      vpc: vpc,
+    });
+
+    const readIntegration = new HttpLambdaIntegration(
+      "ReadIntegration",
+      qdrantReadLambda
+    );
+
+    const writeIntegration = new HttpLambdaIntegration(
+      "WriteIntegration",
+      qdrantWriteLambda
+    );
+
+    // By default, all routes go through the read integration
     const httpApi = new HttpApi(this, "QdrantHttpApi", {
-      defaultIntegration: new HttpLambdaIntegration(
-        "DefaultIntegration",
-        qdrantLambda
-      ),
+      defaultIntegration: readIntegration,
+    });
+
+    // Write routes go to the write integration.
+    writeEndpoints.forEach((endpoint) => {
+      new HttpRoute(this, endpoint.name, {
+        httpApi: httpApi,
+        routeKey: HttpRouteKey.with(endpoint.route, endpoint.method),
+        integration: writeIntegration,
+      });
     });
 
     new CfnOutput(this, "ApiGatewayURL", {
