@@ -2,31 +2,16 @@ import { Construct } from "constructs";
 import { HttpLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
 
 import {
-  Architecture,
   Code,
   Function,
-  Runtime,
   FileSystem as LambdaFilesystem,
 } from "aws-cdk-lib/aws-lambda";
 import { FileSystem, AccessPoint } from "aws-cdk-lib/aws-efs";
 
-import { RetentionDays } from "aws-cdk-lib/aws-logs";
-import {
-  Stack,
-  StackProps,
-  Duration,
-  App,
-  RemovalPolicy,
-  CfnOutput,
-} from "aws-cdk-lib";
-import {
-  HttpApi,
-  HttpRoute,
-  HttpRouteKey,
-  HttpMethod,
-} from "aws-cdk-lib/aws-apigatewayv2";
+import { Stack, StackProps, RemovalPolicy, CfnOutput } from "aws-cdk-lib";
+import { HttpApi, HttpRoute, HttpRouteKey } from "aws-cdk-lib/aws-apigatewayv2";
 import { Vpc } from "aws-cdk-lib/aws-ec2";
-import { Lambda } from "aws-cdk-lib/aws-ses-actions";
+import { readLambdaParams, writeEndpoints, writeLambdaParams } from "./config";
 
 export class QdrantLambdaStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
@@ -63,31 +48,14 @@ export class QdrantLambdaStack extends Stack {
     // because the read lambdas can be run with indexing memory of 0.
 
     const qdrantReadLambda = new Function(this, "QdrantReadLambda", {
-      runtime: Runtime.PROVIDED_AL2023,
-      handler: "not.required",
-      architecture: Architecture.ARM_64,
-      timeout: Duration.seconds(30),
-      logRetention: RetentionDays.ONE_MONTH,
-      memorySize: 3000, // 3 GB memory
+      ...readLambdaParams,
       code: Code.fromAsset("../target/lambda/main_lambda/bootstrap.zip"),
       filesystem: LambdaFilesystem.fromEfsAccessPoint(accessPoint, "/mnt/efs"),
       vpc: vpc,
     });
 
     const qdrantWriteLambda = new Function(this, "QdrantWriteLambda", {
-      runtime: Runtime.PROVIDED_AL2023,
-      handler: "not.required",
-      architecture: Architecture.ARM_64,
-      timeout: Duration.seconds(30),
-      logRetention: RetentionDays.ONE_MONTH,
-      memorySize: 3000, // 3 GB memory
-      // IMP: On fresh AWS accounts the min and max lambda concurrency limit is 10,
-      // If that's the case won't be able to reserve a concurrent execution for this lambda as it will
-      // take your free lambda limit to below your minimum limit.
-      // (read more: https://stackoverflow.com/questions/73988837/aws-specified-concurrentexecutions-for-function-decreases-accounts-unreservedc)
-      // So you might need to request an increase in your max concurrency limit from AWS service quotas.
-      // https://console.aws.amazon.com/servicequotas/home
-      reservedConcurrentExecutions: 1, // Write lambda has a forced concurrency of 1,
+      ...writeLambdaParams,
       code: Code.fromAsset("../target/lambda/main_lambda/bootstrap.zip"),
       filesystem: LambdaFilesystem.fromEfsAccessPoint(accessPoint, "/mnt/efs"),
       vpc: vpc,
@@ -109,16 +77,13 @@ export class QdrantLambdaStack extends Stack {
       defaultIntegration: readIntegration,
     });
 
-    // Write routes should go to the write lambda,
-    // Right now, just aded the put points, path
-    // TODO: Add more paths
-    new HttpRoute(this, "WriteRoutes", {
-      httpApi: httpApi,
-      routeKey: HttpRouteKey.with(
-        "/collections/{collection_name}/points",
-        HttpMethod.PUT
-      ),
-      integration: writeIntegration,
+    // Write routes go to the write lambda.
+    writeEndpoints.forEach((endpoint) => {
+      new HttpRoute(this, endpoint.name, {
+        httpApi: httpApi,
+        routeKey: HttpRouteKey.with(endpoint.route, endpoint.method),
+        integration: writeIntegration,
+      });
     });
 
     new CfnOutput(this, "ApiGatewayURL", {
