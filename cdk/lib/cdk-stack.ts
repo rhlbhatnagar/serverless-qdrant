@@ -41,6 +41,7 @@ export class QdrantLambdaStack extends Stack {
 
     const qdrantReadLambda = new Function(this, "QdrantReadLambda", {
       ...commonLambdaParams,
+      reservedConcurrentExecutions: 1,
       code: Code.fromAsset("../target/lambda/main_lambda/bootstrap.zip"),
       filesystem: LambdaFilesystem.fromEfsAccessPoint(accessPoint, "/mnt/efs"),
       vpc: vpc,
