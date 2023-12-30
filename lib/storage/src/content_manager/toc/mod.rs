@@ -200,7 +200,6 @@ impl TableOfContent {
     pub async fn reset_collections(&self) {
         let mut collections = self.collections.write().await;
         collections.clear();
-        
         let is_distributed = self.consensus_proposal_sender.is_some();
 
         let mut refreshed_collections: HashMap<String, Collection> = Default::default();
