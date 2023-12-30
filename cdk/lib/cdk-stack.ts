@@ -78,14 +78,14 @@ export class QdrantLambdaStack extends Stack {
       defaultIntegration: readIntegration,
     });
 
-    // Write routes go to the write integration.
-    writeEndpoints.forEach((endpoint) => {
-      new HttpRoute(this, endpoint.name, {
-        httpApi: httpApi,
-        routeKey: HttpRouteKey.with(endpoint.route, endpoint.method),
-        integration: writeIntegration,
-      });
-    });
+    // // Write routes go to the write integration.
+    // writeEndpoints.forEach((endpoint) => {
+    //   new HttpRoute(this, endpoint.name, {
+    //     httpApi: httpApi,
+    //     routeKey: HttpRouteKey.with(endpoint.route, endpoint.method),
+    //     integration: writeIntegration,
+    //   });
+    // });
 
     new CfnOutput(this, "ApiGatewayURL", {
       value: httpApi.url!,
