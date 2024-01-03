@@ -41,21 +41,6 @@ export class QdrantLambdaStack extends Stack {
 
     const qdrantReadLambda = new Function(this, "QdrantReadLambda", {
       ...commonLambdaParams,
-      code: Code.fromAsset("../target/lambda/main_lambda/bootstrap.zip"),
-      filesystem: LambdaFilesystem.fromEfsAccessPoint(accessPoint, "/mnt/efs"),
-      vpc: vpc,
-    });
-
-    // IMP: On fresh AWS accounts the min concurrency limit = max lambda concurrency = 10,
-    // If that's the case won't be able to reserve a concurrent execution for this lambda
-    // as this takes your free lambda limit (max - reserved) < min.
-
-    // So you might need to request in your max concurrency limit.
-    // https://console.aws.amazon.com/servicequotas/home
-
-    const qdrantWriteLambda = new Function(this, "QdrantWriteLambda", {
-      ...commonLambdaParams,
-      // Write lambda has a forced concurrency of 1. So don't run into race conditions on the network file system.
       reservedConcurrentExecutions: 1,
       code: Code.fromAsset("../target/lambda/main_lambda/bootstrap.zip"),
       filesystem: LambdaFilesystem.fromEfsAccessPoint(accessPoint, "/mnt/efs"),
@@ -67,24 +52,42 @@ export class QdrantLambdaStack extends Stack {
       qdrantReadLambda
     );
 
-    const writeIntegration = new HttpLambdaIntegration(
-      "WriteIntegration",
-      qdrantWriteLambda
-    );
-
     // By default, all routes go through the read integration
     const httpApi = new HttpApi(this, "QdrantHttpApi", {
       defaultIntegration: readIntegration,
     });
 
-    // Write routes go to the write integration.
-    writeEndpoints.forEach((endpoint) => {
-      new HttpRoute(this, endpoint.name, {
-        httpApi: httpApi,
-        routeKey: HttpRouteKey.with(endpoint.route, endpoint.method),
-        integration: writeIntegration,
-      });
-    });
+    // TODO: Uncomment this once we move to separate read + write integrations.
+
+    // IMP: On fresh AWS accounts the min concurrency limit = max lambda concurrency = 10,
+    // If that's the case won't be able to reserve a concurrent execution for this lambda
+    // as this takes your free lambda limit (max - reserved) < min.
+
+    // So you might need to request in your max concurrency limit.
+    // https://console.aws.amazon.com/servicequotas/home
+
+    // const qdrantWriteLambda = new Function(this, "QdrantWriteLambda", {
+    //   ...commonLambdaParams,
+    //   // Write lambda has a forced concurrency of 1. So don't run into race conditions on the network file system.
+    //   reservedConcurrentExecutions: 1,
+    //   code: Code.fromAsset("../target/lambda/main_lambda/bootstrap.zip"),
+    //   filesystem: LambdaFilesystem.fromEfsAccessPoint(accessPoint, "/mnt/efs"),
+    //   vpc: vpc,
+    // });
+
+    // const writeIntegration = new HttpLambdaIntegration(
+    //   "WriteIntegration",
+    //   qdrantWriteLambda
+    // );
+
+    // // Write routes go to the write integration.
+    // writeEndpoints.forEach((endpoint) => {
+    //   new HttpRoute(this, endpoint.name, {
+    //     httpApi: httpApi,
+    //     routeKey: HttpRouteKey.with(endpoint.route, endpoint.method),
+    //     integration: writeIntegration,
+    //   });
+    // });
 
     new CfnOutput(this, "ApiGatewayURL", {
       value: httpApi.url!,
