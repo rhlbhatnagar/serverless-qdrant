@@ -52,6 +52,8 @@ export class QdrantLambdaStack extends Stack {
       {
         ...commonLambdaParams,
         // This lambda has a forced concurrency of 1. So don't run into race conditions on the network file system.
+        // Used for all endpoints by default, but should definitely be used for endpoints that write to the file system,
+        // like upsert points, create collection etc.
         reservedConcurrentExecutions: 1,
         code: Code.fromAsset("../target/lambda/main_lambda/bootstrap.zip"),
         filesystem: LambdaFilesystem.fromEfsAccessPoint(
@@ -72,7 +74,9 @@ export class QdrantLambdaStack extends Stack {
       defaultIntegration: singleConcurrencyIntegraiton,
     });
 
-    // This lambda is used for some whitelisted read / search / query / scroll endpoints
+    // This lambda is used for whitelisted read / search / query / scroll endpoints
+    // basically ones that won't write to the file system, so that we can have multiple
+    // concurrent access.
     const maxConcurrencyLambda = new Function(this, "MaxConcurrencyLambda", {
       ...commonLambdaParams,
       code: Code.fromAsset("../target/lambda/main_lambda/bootstrap.zip"),

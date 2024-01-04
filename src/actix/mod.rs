@@ -121,7 +121,6 @@ pub async fn init_lambda(
 
         let mut app = App::new()
             .wrap_fn(|req, srv| {
-                let path = req.path().to_string();
                 let toc = req.app_data::<web::Data<TableOfContent>>().unwrap().clone();
                 srv.call(req).and_then(move |res| {
                     async move {
@@ -138,6 +137,7 @@ pub async fn init_lambda(
                         {
                             toc.reset_collections().await;
                         }
+                        Ok(res)
                     }
                 })
             })
