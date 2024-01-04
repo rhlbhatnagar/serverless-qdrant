@@ -9,15 +9,19 @@ pub mod helpers;
 use std::io;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use ::api::grpc::models::{ApiResponse, ApiStatus, VersionInfo};
 use actix_cors::Cors;
 use actix_multipart::form::tempfile::TempFileConfig;
 use actix_multipart::form::MultipartFormConfig;
+use actix_web::dev::Service;
 use actix_web::middleware::{Compress, Condition, Logger};
 use actix_web::{error, get, web, App, HttpRequest, HttpResponse, HttpServer, Responder};
 use collection::operations::validation;
+use futures_util::TryFutureExt;
 use lambda_web::{is_running_on_lambda, run_actix_on_lambda};
+use storage::content_manager::toc::TableOfContent;
 use storage::dispatcher::Dispatcher;
 
 use crate::actix::api::cluster_api::config_cluster_api;
@@ -116,6 +120,31 @@ pub async fn init_lambda(
             .error_handler(|err, rec| validation_error_handler("JSON body", err, rec));
 
         let mut app = App::new()
+            .wrap_fn(|req, srv| {
+                let toc = req.app_data::<web::Data<TableOfContent>>().unwrap().clone();
+                srv.call(req).and_then(move |res| {
+                    async move {
+                        // TODO: This is a little dirty, basiscally, if the toc hasn't been updated in
+                        // 10 minutes, we reload collections from storage
+                        // TODO:
+                        // 1. Move the value from environment variable to config.
+                        // 2. Move to a better architecture, ie, whenever the index is updated on the file system, set the timestamp on the file system
+                        // in this middleware, check if the toc has been updated since that timestamp, and only then refresh.
+                        let refresh_collections_timeout =
+                            std::env::var("REFRESH_COLLECTIONS_TIMEOUT_SEC")
+                                .unwrap_or_default()
+                                .parse::<u64>()
+                                .unwrap_or(600);
+
+                        if toc.last_updated.read().await.elapsed()
+                            > Duration::from_secs(refresh_collections_timeout)
+                        {
+                            toc.reset_collections().await;
+                        }
+                        Ok(res)
+                    }
+                })
+            })
             .wrap(Compress::default()) // Reads the `Accept-Encoding` header to negotiate which compression codec to use.
             // api_key middleware
             // note: the last call to `wrap()` or `wrap_fn()` is executed first
