@@ -15,14 +15,15 @@ use ::api::grpc::models::{ApiResponse, ApiStatus, VersionInfo};
 use actix_cors::Cors;
 use actix_multipart::form::tempfile::TempFileConfig;
 use actix_multipart::form::MultipartFormConfig;
+use actix_web::dev::Service;
 use actix_web::middleware::{Compress, Condition, Logger};
 use actix_web::{error, get, web, App, HttpRequest, HttpResponse, HttpServer, Responder};
 use collection::operations::validation;
-use lambda_web::{is_running_on_lambda, run_actix_on_lambda};
-use storage::dispatcher::Dispatcher;
-use storage::content_manager::toc::TableOfContent;
-use actix_web::dev::Service;
 use futures_util::TryFutureExt;
+use lambda_web::{is_running_on_lambda, run_actix_on_lambda};
+use storage::content_manager::toc::TableOfContent;
+use storage::dispatcher::Dispatcher;
+
 use crate::actix::api::cluster_api::config_cluster_api;
 use crate::actix::api::collections_api::config_collections_api;
 use crate::actix::api::count_api::count_points;
@@ -124,14 +125,17 @@ pub async fn init_lambda(
                 let toc = req.app_data::<web::Data<TableOfContent>>().unwrap().clone();
                 srv.call(req).and_then(move |res| {
                     async move {
-                        // TODO: This is a little dirty, basiscally, if the toc hasn't been updated in 
+                        // TODO: This is a little dirty, basiscally, if the toc hasn't been updated in
                         // 10 minutes, we reload collections from storage
-                        let refresh_collections_timeout = std::env::var("REFRESH_COLLECTIONS_TIMEOUT_SEC")
-                            .unwrap_or_default()
-                            .parse::<u64>()
-                            .unwrap_or(600);
-                        
-                        if toc.last_updated.read().await.elapsed() > Duration::from_secs(refresh_collections_timeout) {
+                        let refresh_collections_timeout =
+                            std::env::var("REFRESH_COLLECTIONS_TIMEOUT_SEC")
+                                .unwrap_or_default()
+                                .parse::<u64>()
+                                .unwrap_or(600);
+
+                        if toc.last_updated.read().await.elapsed()
+                            > Duration::from_secs(refresh_collections_timeout)
+                        {
                             toc.reset_collections().await;
                         }
                     }
