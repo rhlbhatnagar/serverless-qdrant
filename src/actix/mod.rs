@@ -126,6 +126,10 @@ pub async fn init_lambda(
                     async move {
                         // TODO: This is a little dirty, basiscally, if the toc hasn't been updated in
                         // 10 minutes, we reload collections from storage
+                        // TODO:
+                        // 1. Move the value from environment variable to config.
+                        // 2. Move to a better architecture, ie, whenever the index is updated on the file system, set the timestamp on the file system
+                        // in this middleware, check if the toc has been updated since that timestamp, and only then refresh.
                         let refresh_collections_timeout =
                             std::env::var("REFRESH_COLLECTIONS_TIMEOUT_SEC")
                                 .unwrap_or_default()
