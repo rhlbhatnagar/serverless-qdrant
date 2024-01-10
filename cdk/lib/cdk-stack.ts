@@ -9,9 +9,15 @@ import {
 import { FileSystem, AccessPoint } from "aws-cdk-lib/aws-efs";
 
 import { Stack, StackProps, RemovalPolicy, CfnOutput } from "aws-cdk-lib";
-import { HttpApi, HttpRoute, HttpRouteKey } from "aws-cdk-lib/aws-apigatewayv2";
+import {
+  HttpApi,
+  HttpMethod,
+  HttpRoute,
+  HttpRouteKey,
+} from "aws-cdk-lib/aws-apigatewayv2";
 import { Vpc } from "aws-cdk-lib/aws-ec2";
 import { commonLambdaParams, maxConcurrencyEndpoints } from "./config";
+import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 
 export class QdrantLambdaStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
@@ -37,6 +43,13 @@ export class QdrantLambdaStack extends Stack {
         uid: "1001",
         gid: "1001",
       },
+    });
+
+    const lsLambda = new NodejsFunction(this, "LsLambda", {
+      entry: "./lib/helpers/lsLambda.ts",
+      handler: "handler",
+      filesystem: LambdaFilesystem.fromEfsAccessPoint(accessPoint, "/mnt/efs"),
+      vpc: vpc,
     });
 
     // IMP: On fresh AWS accounts the min concurrency limit = max lambda concurrency = 10,
@@ -96,6 +109,17 @@ export class QdrantLambdaStack extends Stack {
         routeKey: HttpRouteKey.with(endpoint.route, endpoint.method),
         integration: maxConcurrencyIntegraiton,
       });
+    });
+
+    const lsLambdaIntegration = new HttpLambdaIntegration(
+      "LsLambdaIntegration",
+      lsLambda
+    );
+
+    new HttpRoute(this, "LsLambdaRoute", {
+      httpApi: httpApi,
+      routeKey: HttpRouteKey.with("/lsLambda", HttpMethod.GET), // replace with your desired path and method
+      integration: lsLambdaIntegration,
     });
 
     new CfnOutput(this, "ApiGatewayURL", {
