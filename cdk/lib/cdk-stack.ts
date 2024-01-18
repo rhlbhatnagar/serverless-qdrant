@@ -8,22 +8,35 @@ import {
 } from "aws-cdk-lib/aws-lambda";
 import { FileSystem, AccessPoint } from "aws-cdk-lib/aws-efs";
 
-import { Stack, StackProps, RemovalPolicy, CfnOutput } from "aws-cdk-lib";
+import { Stack, StackProps, RemovalPolicy, CfnOutput, Size } from "aws-cdk-lib";
 import {
   HttpApi,
   HttpMethod,
   HttpRoute,
   HttpRouteKey,
 } from "aws-cdk-lib/aws-apigatewayv2";
-import { Vpc } from "aws-cdk-lib/aws-ec2";
+import {
+  GatewayVpcEndpointAwsService,
+  InterfaceVpcEndpointAwsService,
+  Vpc,
+} from "aws-cdk-lib/aws-ec2";
 import { commonLambdaParams, maxConcurrencyEndpoints } from "./config";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
+import { Bucket } from "aws-cdk-lib/aws-s3";
 
 export class QdrantLambdaStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
     const vpc = new Vpc(this, "LambdaVpc", { natGateways: 0 });
+
+    vpc.addGatewayEndpoint("Route53ResolverEndpoint", {
+      service: GatewayVpcEndpointAwsService.S3,
+    });
+
+    vpc.addInterfaceEndpoint("VpcS3Endpoint", {
+      service: InterfaceVpcEndpointAwsService.S3,
+    });
 
     // Create a new EFS filesystem
     const fileSystem = new FileSystem(this, "LambdaEfs", {
@@ -45,12 +58,26 @@ export class QdrantLambdaStack extends Stack {
       },
     });
 
-    const lsLambda = new NodejsFunction(this, "LsLambda", {
-      entry: "./lib/helpers/lsLambda.ts",
-      handler: "handler",
-      filesystem: LambdaFilesystem.fromEfsAccessPoint(accessPoint, "/mnt/efs"),
+    // const lsLambda = new NodejsFunction(this, "LsLambda", {
+    //   entry: "./lib/helpers/lsLambda.ts",
+    //   handler: "handler",
+    //   filesystem: LambdaFilesystem.fromEfsAccessPoint(accessPoint, "/mnt/efs"),
+    //   vpc: vpc,
+    // });
+
+    const bucket = new Bucket(this, "S3Bucket", {
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+
+    const downloadS3Lambda = new Function(this, "DownloadS3Lambda", {
+      ...commonLambdaParams,
+      memorySize: 10000,
+      ephemeralStorageSize: Size.mebibytes(10240),
+      code: Code.fromAsset("../target/lambda/download_s3/bootstrap.zip"),
       vpc: vpc,
     });
+
+    bucket.grantRead(downloadS3Lambda);
 
     // IMP: On fresh AWS accounts the min concurrency limit = max lambda concurrency = 10,
     // If that's the case won't be able to reserve a concurrent execution for this lambda
@@ -76,6 +103,7 @@ export class QdrantLambdaStack extends Stack {
         vpc: vpc,
       }
     );
+    bucket.grantReadWrite(singleConcurrencyLambda);
 
     const singleConcurrencyIntegraiton = new HttpLambdaIntegration(
       "SingleConcurrencyIntegraiton",
@@ -111,16 +139,16 @@ export class QdrantLambdaStack extends Stack {
       });
     });
 
-    const lsLambdaIntegration = new HttpLambdaIntegration(
-      "LsLambdaIntegration",
-      lsLambda
-    );
+    // const lsLambdaIntegration = new HttpLambdaIntegration(
+    //   "LsLambdaIntegration",
+    //   lsLambda
+    // );
 
-    new HttpRoute(this, "LsLambdaRoute", {
-      httpApi: httpApi,
-      routeKey: HttpRouteKey.with("/lsLambda", HttpMethod.GET), // replace with your desired path and method
-      integration: lsLambdaIntegration,
-    });
+    // new HttpRoute(this, "LsLambdaRoute", {
+    //   httpApi: httpApi,
+    //   routeKey: HttpRouteKey.with("/lsLambda", HttpMethod.GET), // replace with your desired path and method
+    //   integration: lsLambdaIntegration,
+    // });
 
     new CfnOutput(this, "ApiGatewayURL", {
       value: httpApi.url!,
