@@ -1,18 +1,18 @@
-use aws_sdk_s3 as s3;
-use aws_lambda_events::event::s3::S3Event;
-use lambda_runtime::{handler_fn, Context, Error, LambdaEvent};
-use log::warn;
 use std::env;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Instant;
+
+use async_recursion::async_recursion;
+use aws_lambda_events::event::s3::S3Event;
+use aws_sdk_s3 as s3;
+use futures::future::join_all;
+use lambda_runtime::{handler_fn, Context, Error, LambdaEvent};
+use log::warn;
+use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
-use std::time::Instant;
-use async_recursion::async_recursion;
-use serde::{Deserialize, Serialize};
-use futures::future::join_all;
-
 
 // async fn download_file(client: &s3::Client, bucket: &str, key: &str, dest: &str) -> Result<(), s3::Error> {
 //     let resp = client.get_object().bucket(bucket).key(format!("storage/{}", key)).send().await?;
@@ -29,9 +29,18 @@ use futures::future::join_all;
 //     Ok(())
 // }
 
-
-async fn download_file(client: &s3::Client, bucket: &str, key: &str, dest: &str) -> Result<(), s3::Error> {
-    let resp = client.get_object().bucket(bucket).key(format!("storage/{}", key)).send().await?;
+async fn download_file(
+    client: &s3::Client,
+    bucket: &str,
+    key: &str,
+    dest: &str,
+) -> Result<(), s3::Error> {
+    let resp = client
+        .get_object()
+        .bucket(bucket)
+        .key(format!("storage/{}", key))
+        .send()
+        .await?;
     warn!("{}", dest);
     let mut file = fs::File::create(dest).await.unwrap();
     let mut body = resp.body;
@@ -43,15 +52,19 @@ async fn download_file(client: &s3::Client, bucket: &str, key: &str, dest: &str)
 }
 
 #[async_recursion]
-async fn process_dir(client: Arc<s3::Client>, bucket: String, path: String, prefix: String, counter: Arc<Mutex<u32>>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn process_dir(
+    client: Arc<s3::Client>,
+    bucket: String,
+    path: String,
+    prefix: String,
+    counter: Arc<Mutex<u32>>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut tasks = vec![];
     let mut dir_entries = fs::read_dir(&path).await?;
 
     while let Some(entry) = dir_entries.next_entry().await? {
         let path = entry.path();
         let key = format!("{}{}", prefix, entry.file_name().to_str().unwrap());
-
-
 
         if path.is_dir() {
             let client_clone = Arc::clone(&client);
@@ -61,7 +74,13 @@ async fn process_dir(client: Arc<s3::Client>, bucket: String, path: String, pref
             let path_str = path.to_str().unwrap().to_owned();
             tasks.push(tokio::spawn(async move {
                 // Box the future here to avoid the cycle
-                let process_future = process_dir(client_clone, bucket_clone, path_str, new_prefix, counter_clone);
+                let process_future = process_dir(
+                    client_clone,
+                    bucket_clone,
+                    path_str,
+                    new_prefix,
+                    counter_clone,
+                );
                 let boxed_future = Box::pin(process_future);
                 boxed_future.await
             }));
@@ -93,25 +112,22 @@ async fn process_dir(client: Arc<s3::Client>, bucket: String, path: String, pref
     Ok(())
 }
 
-
 #[derive(Deserialize, Serialize)]
 pub struct EmailSendRequest {
     pub bucket: Option<String>,
     pub path: Option<String>,
-
 }
 
 async fn lambda_handler(event: EmailSendRequest, _: Context) -> Result<(), Error> {
     let bucket = "qdrantlambdastack-s3bucket07682993-hsduqsiqbibh"; //env::var("BUCKET_NAME").expect("BUCKET_NAME must be set");
-    let dest = "/tmp/".to_string();// env::var("PATH").expect("PATH must be set");
+    let dest = "/tmp/".to_string(); // env::var("PATH").expect("PATH must be set");
 
     let shared_config = aws_config::load_from_env().await;
     let client = Arc::new(s3::Client::new(&shared_config));
-    
 
     let start_time = Instant::now();
     download_s3_objects(client, bucket, "storage", "/tmp").await;
-//    process_dir(client, bucket, path, "".to_string(), counter.clone()).await.unwrap();
+    //    process_dir(client, bucket, path, "".to_string(), counter.clone()).await.unwrap();
     let duration = start_time.elapsed();
 
     println!("Copied files in {:?}", duration);
@@ -119,10 +135,18 @@ async fn lambda_handler(event: EmailSendRequest, _: Context) -> Result<(), Error
     Ok(())
 }
 
-async fn download_s3_objects(client: Arc<s3::Client>, bucket: &str, path: &str, dest: &str) -> Result<(), Error> {
-    let resp = client.list_objects_v2().bucket(bucket).prefix(path).send().await?;
-
-    
+async fn download_s3_objects(
+    client: Arc<s3::Client>,
+    bucket: &str,
+    path: &str,
+    dest: &str,
+) -> Result<(), Error> {
+    let resp = client
+        .list_objects_v2()
+        .bucket(bucket)
+        .prefix(path)
+        .send()
+        .await?;
 
     let mut tasks = vec![];
 
@@ -132,7 +156,12 @@ async fn download_s3_objects(client: Arc<s3::Client>, bucket: &str, path: &str, 
         let bucket_clone = bucket.to_string();
         let dest_clone = dest.to_string();
         tasks.push(tokio::spawn(async move {
-            let resp = client_clone.get_object().bucket(&bucket_clone).key(&key).send().await?;
+            let resp = client_clone
+                .get_object()
+                .bucket(&bucket_clone)
+                .key(&key)
+                .send()
+                .await?;
             let body = resp.body.collect().await.unwrap();
             let dest_path = format!("{}/{}", dest_clone, key);
             let parent_dir = std::path::Path::new(&dest_path).parent().unwrap();
@@ -154,6 +183,8 @@ async fn download_s3_objects(client: Arc<s3::Client>, bucket: &str, path: &str, 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //lambda_handler().await;
-    lambda_runtime::run(handler_fn(lambda_handler)).await.unwrap();
+    lambda_runtime::run(handler_fn(lambda_handler))
+        .await
+        .unwrap();
     Ok(())
 }
