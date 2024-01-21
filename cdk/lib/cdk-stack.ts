@@ -8,7 +8,14 @@ import {
 } from "aws-cdk-lib/aws-lambda";
 import { FileSystem, AccessPoint } from "aws-cdk-lib/aws-efs";
 
-import { Stack, StackProps, RemovalPolicy, CfnOutput, Size } from "aws-cdk-lib";
+import {
+  Stack,
+  StackProps,
+  RemovalPolicy,
+  CfnOutput,
+  Size,
+  Duration,
+} from "aws-cdk-lib";
 import {
   HttpApi,
   HttpMethod,
@@ -58,12 +65,12 @@ export class QdrantLambdaStack extends Stack {
       },
     });
 
-    // const lsLambda = new NodejsFunction(this, "LsLambda", {
-    //   entry: "./lib/helpers/lsLambda.ts",
-    //   handler: "handler",
-    //   filesystem: LambdaFilesystem.fromEfsAccessPoint(accessPoint, "/mnt/efs"),
-    //   vpc: vpc,
-    // });
+    const lsLambda = new NodejsFunction(this, "LsLambda", {
+      entry: "./lib/helpers/lsLambda.ts",
+      handler: "handler",
+      filesystem: LambdaFilesystem.fromEfsAccessPoint(accessPoint, "/mnt/efs"),
+      vpc: vpc,
+    });
 
     const bucket = new Bucket(this, "S3Bucket", {
       removalPolicy: RemovalPolicy.DESTROY,
@@ -71,9 +78,11 @@ export class QdrantLambdaStack extends Stack {
 
     const downloadS3Lambda = new Function(this, "DownloadS3Lambda", {
       ...commonLambdaParams,
-      memorySize: 10000,
+      memorySize: 3000,
+      timeout: Duration.minutes(10),
       ephemeralStorageSize: Size.mebibytes(10240),
       code: Code.fromAsset("../target/lambda/download_s3/bootstrap.zip"),
+      filesystem: LambdaFilesystem.fromEfsAccessPoint(accessPoint, "/mnt/efs"),
       vpc: vpc,
     });
 
@@ -139,16 +148,16 @@ export class QdrantLambdaStack extends Stack {
       });
     });
 
-    // const lsLambdaIntegration = new HttpLambdaIntegration(
-    //   "LsLambdaIntegration",
-    //   lsLambda
-    // );
+    const lsLambdaIntegration = new HttpLambdaIntegration(
+      "LsLambdaIntegration",
+      lsLambda
+    );
 
-    // new HttpRoute(this, "LsLambdaRoute", {
-    //   httpApi: httpApi,
-    //   routeKey: HttpRouteKey.with("/lsLambda", HttpMethod.GET), // replace with your desired path and method
-    //   integration: lsLambdaIntegration,
-    // });
+    new HttpRoute(this, "LsLambdaRoute", {
+      httpApi: httpApi,
+      routeKey: HttpRouteKey.with("/lsLambda", HttpMethod.GET), // replace with your desired path and method
+      integration: lsLambdaIntegration,
+    });
 
     new CfnOutput(this, "ApiGatewayURL", {
       value: httpApi.url!,

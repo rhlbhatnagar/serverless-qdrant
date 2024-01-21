@@ -75,7 +75,7 @@ storage:
     # If search speed is more important - make this parameter higher.
     # Note: 1Kb = 1 vector of size 256
     # If not set, will be automatically selected considering the number of available CPUs.
-    max_segment_size_kb: null
+    max_segment_size_kb: 1000000
 
     # Maximum size (in KiloBytes) of vectors to store in-memory per segment.
     # Segments larger than this threshold will be stored as read-only memmaped file.
@@ -83,7 +83,7 @@ storage:
     # Note: 1Kb = 1 vector of size 256
     # To explicitly disable mmap optimization, set to `0`.
     # If not set, will be disabled by default.
-    memmap_threshold_kb: null
+    memmap_threshold_kb: 200000
 
     # Maximum size (in KiloBytes) of vectors allowed for plain index.
     # Default value based on https://github.com/google-research/google-research/blob/master/scann/docs/algorithms.md
