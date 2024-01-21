@@ -12,12 +12,20 @@ use log::warn;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::Mutex;
-use tokio::sync::Semaphore;
+use tokio::sync::{Mutex, Semaphore};
 
-
-async fn download_file(client: &s3::Client, bucket: &str, key: &str, dest: &str) -> Result<(), s3::Error> {
-    let resp = client.get_object().bucket(bucket).key(format!("storage/{}", key)).send().await?;
+async fn download_file(
+    client: &s3::Client,
+    bucket: &str,
+    key: &str,
+    dest: &str,
+) -> Result<(), s3::Error> {
+    let resp = client
+        .get_object()
+        .bucket(bucket)
+        .key(format!("storage/{}", key))
+        .send()
+        .await?;
 
     let body = resp.body.collect().await.unwrap();
 
@@ -36,7 +44,6 @@ pub struct DownloadFileReq {
     pub bucket: Option<String>,
     pub path: Option<String>,
 }
-
 
 async fn lambda_handler(event: DownloadFileReq, _: Context) -> Result<(), Error> {
     let bucket = "qdrantlambdastack-s3bucket07682993-hsduqsiqbibh"; //env::var("BUCKET_NAME").expect("BUCKET_NAME must be set");
@@ -71,7 +78,6 @@ async fn download_s3_objects(
     let mut tasks = vec![];
 
     let semaphore = Arc::new(Semaphore::new(5)); // Adjust this number based on your memory constraints
-
 
     for object in resp.contents.unwrap_or_default() {
         let key = object.key.unwrap();
