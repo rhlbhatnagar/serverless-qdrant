@@ -11,18 +11,39 @@ export const commonLambdaParams = {
   logRetention: RetentionDays.ONE_MONTH,
   memorySize: 3000, // 3 GB memory
 };
-// TODO: Add more endpoints that write data on the index.
-// /src/actix/api/update_api.rs, /src/actix/api/collection_api.rs
-export const writeEndpoints = [
+
+// TODO: Add more endpoints that can be accessed with unlimited concurrency.
+// /src/actix/api/retrieve_api.rs, /src/actix/api/config_search_api.rs
+export const maxConcurrencyEndpoints = [
   {
-    name: "upsert_points",
-    route: "/collections/{name}/points",
-    method: HttpMethod.PUT,
+    name: "search_points",
+    route: "/collections/{name}/points/search",
+    method: HttpMethod.POST,
   },
   {
-    name: "delete_points",
-    route: "/collections/{name}/points/delete",
-    method: HttpMethod.DELETE,
+    name: "batch_search_points",
+    route: "/collections/{name}/points/search/batch",
+    method: HttpMethod.POST,
+  },
+  {
+    name: "search_point_groups",
+    route: "/collections/{name}/points/search/groups",
+    method: HttpMethod.POST,
+  },
+  {
+    name: "scroll_points",
+    route: "/collections/{name}/points/scroll",
+    method: HttpMethod.POST,
+  },
+  {
+    name: "get_points",
+    route: "/collections/{name}/points",
+    method: HttpMethod.POST,
+  },
+  {
+    name: "get_point",
+    route: "/collections/{name}/points/{id}",
+    method: HttpMethod.POST,
   },
   // Add more endpoints here
 ];

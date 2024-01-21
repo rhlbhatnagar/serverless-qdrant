@@ -14,7 +14,7 @@ use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use api::grpc::qdrant::qdrant_internal_client::QdrantInternalClient;
 use api::grpc::qdrant::WaitOnConsensusCommitRequest;
@@ -77,6 +77,8 @@ pub struct TableOfContent {
     collection_create_lock: Mutex<()>,
     /// Dispatcher for shard transfer to access consensus.
     shard_transfer_dispatcher: parking_lot::Mutex<Option<ShardTransferDispatcher>>,
+    /// Time instant field to track the last update
+    pub last_updated: RwLock<std::time::Instant>,
 }
 
 impl TableOfContent {
@@ -194,7 +196,84 @@ impl TableOfContent {
             update_rate_limiter: rate_limiter,
             collection_create_lock: Default::default(),
             shard_transfer_dispatcher: Default::default(),
+            last_updated: Instant::now().into(),
         }
+    }
+
+    pub async fn reset_collections(&self) {
+        let mut collections = self.collections.write().await;
+        let mut last_updated = self.last_updated.write().await;
+
+        collections.clear();
+        let is_distributed = self.consensus_proposal_sender.is_some();
+
+        let mut refreshed_collections: HashMap<String, Collection> = Default::default();
+
+        let snapshots_path = Path::new(&self.storage_config.snapshots_path.clone()).to_owned();
+        create_dir_all(&snapshots_path).expect("Can't create Snapshots directory");
+        let collections_path = Path::new(&self.storage_config.storage_path).join(COLLECTIONS_DIR);
+        create_dir_all(&collections_path).expect("Can't create Collections directory");
+
+        let collection_paths =
+            read_dir(&collections_path).expect("Can't read Collections directory");
+
+        for entry in collection_paths {
+            let collection_path = entry
+                .expect("Can't access of one of the collection files")
+                .path();
+
+            if !CollectionConfig::check(&collection_path) {
+                log::warn!(
+                    "Collection config is not found in the collection directory: {:?}, skipping",
+                    collection_path
+                );
+                continue;
+            }
+
+            let collection_name = collection_path
+                .file_name()
+                .expect("Can't resolve a filename of one of the collection files")
+                .to_str()
+                .expect("A filename of one of the collection files is not a valid UTF-8")
+                .to_string();
+            let collection_snapshots_path =
+                Self::collection_snapshots_path(&snapshots_path, &collection_name);
+            create_dir_all(&collection_snapshots_path).unwrap_or_else(|e| {
+                panic!("Can't create a directory for snapshot of {collection_name}: {e}")
+            });
+            log::info!("Loading collection: {}", collection_name);
+            let collection = Collection::load(
+                collection_name.clone(),
+                self.this_peer_id,
+                &collection_path,
+                &collection_snapshots_path,
+                self.storage_config
+                    .to_shared_storage_config(is_distributed)
+                    .into(),
+                self.channel_service.clone(),
+                Self::change_peer_state_callback(
+                    self.consensus_proposal_sender.clone(),
+                    collection_name.clone(),
+                    ReplicaState::Dead,
+                    None,
+                ),
+                Self::request_shard_transfer_callback(
+                    self.consensus_proposal_sender.clone(),
+                    collection_name.clone(),
+                ),
+                Self::abort_shard_transfer_callback(
+                    self.consensus_proposal_sender.clone(),
+                    collection_name.clone(),
+                ),
+                Some(self.search_runtime.handle().clone()),
+                Some(self.update_runtime.handle().clone()),
+            )
+            .await;
+
+            refreshed_collections.insert(collection_name, collection);
+        }
+        *last_updated = Instant::now();
+        *collections = refreshed_collections;
     }
 
     /// PeerId does not change during execution so it is ok to copy it here.
@@ -311,6 +390,7 @@ impl TableOfContent {
             update_rate_limiter: rate_limiter,
             collection_create_lock: Default::default(),
             shard_transfer_dispatcher: Default::default(),
+            last_updated: Instant::now().into(),
         }
     }
 

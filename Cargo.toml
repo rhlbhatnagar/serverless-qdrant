@@ -84,7 +84,11 @@ prometheus = { version = "0.13.3", default-features = false }
 validator = { version = "0.16", features = ["derive"] }
 actix-web-validator = "5.0.1"
 lambda-web = { version = "0.2.0", features=["actix4"] }
-
+lambda_runtime = "0.9.0"
+aws_lambda_events = "0.13.0"
+aws-sdk-s3 = "1.12.0"
+aws-config = "1.1.2"
+async-recursion = "1.0.5"
 
 # Consensus related crates
 raft = { version = "0.7.0", features = ["prost-codec"], default-features = false }
